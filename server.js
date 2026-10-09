@@ -8,11 +8,13 @@ const REFERER = "https://player.mediavitrina.ru/";
 const CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/config.json";
 
-// Переменная окружения в Layero
-const GIST_KEYS_URL = process.env.DEVICES_CONFIG_URL || "";
+// Переменные окружения в Layero (подхватывает DEVICES_CONFIG_URL)
+const GIST_KEYS_URL =
+  process.env.DEVICES_CONFIG_URL || process.env.GIST_KEYS_URL || "";
 
-// Кэширование на 5 минут (в мс)
-const CACHE_TTL = 5 * 60 * 1000;
+// Раздельное время жизни кэша:
+const CONFIG_TTL = 12 * 60 * 60 * 1000; // 12 часов (2 раза в сутки для GitVerse)
+const KEYS_TTL = 5 * 60 * 1000;         // 5 минут (для авто-проверки устройств)
 
 let configCache = null;
 let configExpiresAt = 0;
@@ -44,7 +46,7 @@ app.use((req, res, next) => {
 });
 
 // ======================================================
-// KEYS & CONFIG LOADER
+// KEYS LOADER (Кэш 5 минут)
 // ======================================================
 
 async function loadAllowedKeys() {
@@ -55,17 +57,17 @@ async function loadAllowedKeys() {
   try {
     const response = await fetch(GIST_KEYS_URL, {
       cache: "no-store",
-      signal: AbortSignal.timeout(3000), // Таймаут 3 сек
+      signal: AbortSignal.timeout(3000), // Таймаут 3 секунды
     });
 
     if (response.ok) {
       const data = await response.json();
       keysCache = Array.isArray(data) ? data : data.keys || [];
-      keysExpiresAt = now + CACHE_TTL;
+      keysExpiresAt = now + KEYS_TTL;
       return keysCache;
     }
   } catch (err) {
-    console.error("[Keys] Ошибка загрузки ключей:", err);
+    console.error("[Keys] Ошибка загрузки ключей из Gist:", err);
   }
 
   return keysCache || [];
@@ -74,9 +76,13 @@ async function loadAllowedKeys() {
 async function isKeyValid(devKey) {
   if (!devKey) return false;
   const allowed = await loadAllowedKeys();
-  if (allowed.length === 0) return true; // Если Gist временно недоступен
+  if (allowed.length === 0) return true; // Если Gist временно недоступен — пропускаем
   return allowed.includes(devKey);
 }
+
+// ======================================================
+// CONFIG LOADER (Кэш 12 часов)
+// ======================================================
 
 async function loadConfig() {
   const now = Date.now();
@@ -84,7 +90,7 @@ async function loadConfig() {
 
   const response = await fetch(CONFIG_URL, {
     cache: "no-store",
-    signal: AbortSignal.timeout(3000), // Таймаут 3 сек
+    signal: AbortSignal.timeout(3000), // Таймаут 3 секунды
     headers: {
       "User-Agent": USER_AGENT,
       "Accept": "application/json",
@@ -99,7 +105,7 @@ async function loadConfig() {
   }
 
   configCache = config;
-  configExpiresAt = now + CACHE_TTL;
+  configExpiresAt = now + CONFIG_TTL; // Сохраняем на 12 часов
   return configCache;
 }
 
@@ -167,7 +173,7 @@ app.get("*", async (req, res) => {
       return res.send("Layero Mediavitrina proxy is working.\n");
     }
 
-    // 3. Загрузка конфига
+    // 3. Загрузка конфига (из памяти за 1 мс или из GitVerse раз в 12 часов)
     let config;
     try {
       config = await loadConfig();
@@ -191,7 +197,7 @@ app.get("*", async (req, res) => {
     // 5. Запросить плейлист из Витрины
     const response = await fetch(targetUrl, {
       headers: vitrinaHeaders(),
-      signal: AbortSignal.timeout(5000), // Таймаут 5 сек
+      signal: AbortSignal.timeout(5000), // Таймаут 5 секунд
     });
 
     if (!response.ok) {
