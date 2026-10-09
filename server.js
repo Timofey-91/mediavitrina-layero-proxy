@@ -9,8 +9,7 @@ const CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/config.json";
 
 // Переменные окружения в Layero (подхватывает DEVICES_CONFIG_URL)
-const GIST_KEYS_URL =
-  process.env.DEVICES_CONFIG_URL || process.env.GIST_KEYS_URL || "";
+const GIST_KEYS_URL = process.env.DEVICES_CONFIG_URL || "";
 
 // Раздельное время жизни кэша:
 const CONFIG_TTL = 12 * 60 * 60 * 1000; // 12 часов (2 раза в сутки для GitVerse)
