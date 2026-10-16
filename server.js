@@ -369,6 +369,13 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    // Перехват системных проверок здоровья (Healthcheck) от Layero и фавиконки
+    if (url.pathname.includes("__layero_probe") || url.pathname === "/favicon.ico") {
+      response.writeHead(404, corsHeaders());
+      response.end();
+      return;
+    }
+
     const devKey = url.searchParams.get("dev");
     if (DEVICES_CONFIG_URL && ALLOWED_DEVICES.size > 0) {
       if (!devKey || !ALLOWED_DEVICES.has(devKey)) {
