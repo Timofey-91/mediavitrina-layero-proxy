@@ -9,7 +9,7 @@ const DEVICES_CONFIG_URL = process.env.DEVICES_CONFIG_URL;
 // CONFIG URLS
 // ======================================================
 const LIME_CONFIG_URL =
-  "https://gitverse.ru/api/repos/Timofey91/peer_test/raw/branch/master/config.json";
+  "https://gist.githubusercontent.com/Timofey-91/012ae09e5e2fef74420cb959f4f37c0f/raw/f74c04201372f1ab4ddd1db287ed49e871ef578d/gistfile1.txt";
 
 const WINK_CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/wink.json";
