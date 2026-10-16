@@ -8,14 +8,21 @@ const DEVICES_CONFIG_URL = process.env.DEVICES_CONFIG_URL;
 // ======================================================
 // CONFIG URLS
 // ======================================================
-const LIME_CONFIG_URL =
-  "https://gitverse.ru/api/repos/Timofey91/peer_test/raw/branch/master/config.json";
-
+// LIME_CONFIG_URL больше не нужен, так как собираем сами прямо на Layero!
 const WINK_CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/wink.json";
 
 const VITRINA_CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/config.json";
+
+// ======================================================
+// TARGET LIME CHANNELS & PARSER SETTINGS
+// ======================================================
+const TARGET_CHANNELS = [
+  { key: "tvc_plus2", id: 129, region: 66, tz: 5 },
+  { key: "tvc_plus4", id: 129, region: 54, tz: 7 },
+  { key: "tvc_plus6", id: 129, region: 25, tz: 10 },
+];
 
 // ======================================================
 // HEADERS & AGENTS
@@ -151,6 +158,82 @@ async function fetchAllowedDevices() {
 }
 
 // ======================================================
+// LIME PARSER (Прямое получение ссылок от Lime HD)
+// ======================================================
+async function fetchLimeConfigDirectly() {
+  console.log("[Lime Parser] Запуск обновления ссылок Lime HD...");
+  const limeData = {};
+
+  for (const ch of TARGET_CHANNELS) {
+    try {
+      const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
+      const apiRes = await fetchWithRetry(apiUrl, {
+        headers: { "User-Agent": "Mozilla/5.0", "X-LHD-Agent": LHD_AGENT }
+      }, 3, 5000);
+
+      if (!apiRes.ok) continue;
+      const data = await apiRes.json();
+
+      let masterUrl = null;
+      function recursiveFind(obj) {
+        if (masterUrl) return;
+        if (typeof obj === "string" && obj.startsWith("http") && obj.includes("index.m3u8")) {
+          masterUrl = obj;
+          return;
+        }
+        if (Array.isArray(obj)) {
+          obj.forEach(recursiveFind);
+        } else if (obj && typeof obj === "object") {
+          Object.values(obj).forEach(recursiveFind);
+        }
+      }
+      recursiveFind(data);
+
+      if (!masterUrl) continue;
+
+      const masterRes = await fetchWithRetry(masterUrl, {
+        headers: { "User-Agent": "Mozilla/5.0", "X-LHD-Agent": LHD_AGENT }
+      }, 3, 5000);
+
+      if (!masterRes.ok) continue;
+      const masterText = await masterRes.text();
+
+      const lines = masterText.split(/\r?\n/);
+      const streams = [];
+      let currentInf = null;
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("#EXT-X-STREAM-INF:")) {
+          currentInf = trimmed;
+          continue;
+        }
+        if (currentInf && trimmed && !trimmed.startsWith("#")) {
+          const bwMatch = currentInf.match(/BANDWIDTH=(\d+)/);
+          const bandwidth = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+          const absoluteUrl = new URL(trimmed, masterRes.url).toString();
+          streams.push({ bandwidth, url: absoluteUrl });
+          currentInf = null;
+        }
+      }
+
+      if (streams.length === 0) continue;
+
+      // Сортируем по битрейту (от высокого к низкому) и берём 3-й вариант (480p) или минимальный
+      streams.sort((a, b) => b.bandwidth - a.bandwidth);
+      const selected = streams.length >= 3 ? streams[2] : streams[streams.length - 1];
+
+      limeData[ch.key] = selected.url;
+      console.log(`[Lime Parser] Канал ${ch.key} успешно получен.`);
+    } catch (e) {
+      console.error(`[Lime Parser] Ошибка для канала ${ch.key}:`, e.message);
+    }
+  }
+
+  return limeData;
+}
+
+// ======================================================
 // CONFIG LOADER (Сброс кэша 2 раза в сутки: в 03:22 и 15:22 по Ташкенту)
 // ======================================================
 function getLatestResetTimestamp() {
@@ -184,13 +267,8 @@ async function fetchConfig(forceRefresh = false) {
     return configCache.data;
   }
 
-  const [limeRes, winkRes, vitrinaRes] = await Promise.allSettled([
-    fetchWithRetry(
-      LIME_CONFIG_URL,
-      { headers: { "Cache-Control": "no-cache, no-store", "User-Agent": "Mozilla/5.0", "X-LHD-Agent": LHD_AGENT } },
-      3,
-      5000
-    ),
+  const [limeData, winkRes, vitrinaRes] = await Promise.allSettled([
+    fetchLimeConfigDirectly(),
     fetchWithRetry(
       WINK_CONFIG_URL,
       { headers: { "Cache-Control": "no-cache, no-store", "User-Agent": "Mozilla/5.0" } },
@@ -205,12 +283,12 @@ async function fetchConfig(forceRefresh = false) {
     ),
   ]);
 
-  let limeData = {};
+  let limeMap = {};
   let winkData = {};
   let vitrinaData = {};
 
-  if (limeRes.status === "fulfilled" && limeRes.value.ok) {
-    try { limeData = await limeRes.value.json(); } catch (e) {}
+  if (limeData.status === "fulfilled") {
+    limeMap = limeData.value || {};
   }
   if (winkRes.status === "fulfilled" && winkRes.value.ok) {
     try { winkData = await winkRes.value.json(); } catch (e) {}
@@ -221,7 +299,7 @@ async function fetchConfig(forceRefresh = false) {
 
   const combinedMap = {};
 
-  for (const [ch, url] of Object.entries(limeData)) {
+  for (const [ch, url] of Object.entries(limeMap)) {
     combinedMap[ch] = { url, provider: "lime" };
   }
   for (const [ch, url] of Object.entries(winkData)) {
