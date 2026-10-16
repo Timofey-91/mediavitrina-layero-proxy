@@ -9,13 +9,22 @@ const DEVICES_CONFIG_URL = process.env.DEVICES_CONFIG_URL;
 // CONFIG URLS
 // ======================================================
 const LIME_CONFIG_URL =
-  "https://gist.githubusercontent.com/Timofey-91/012ae09e5e2fef74420cb959f4f37c0f/raw/f74c04201372f1ab4ddd1db287ed49e871ef578d/gistfile1.txt";
+  "https://gitverse.ru/api/repos/Timofey91/peer_test/raw/branch/master/config.json";
 
 const WINK_CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/wink.json";
 
 const VITRINA_CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/config.json";
+
+// ======================================================
+// LIME DYNAMIC CHANNELS (Генерация на лету с IP Layero)
+// ======================================================
+const LIME_CHANNELS = {
+  "tvc_plus2": { id: 129, region: 66, tz: 5 },
+  "tvc_plus4": { id: 129, region: 54, tz: 7 },
+  "tvc_plus6": { id: 129, region: 25, tz: 10 },
+};
 
 // ======================================================
 // HEADERS & AGENTS
@@ -151,7 +160,7 @@ async function fetchAllowedDevices() {
 }
 
 // ======================================================
-// CONFIG LOADER (Сброс кэша 2 раза в сутки: в 03:22 и 15:22 по Ташкенту)
+// CONFIG LOADER
 // ======================================================
 function getLatestResetTimestamp() {
   const now = new Date();
@@ -369,7 +378,6 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    // Перехват системных проверок здоровья (Healthcheck) от Layero и фавиконки
     if (url.pathname.includes("__layero_probe") || url.pathname === "/favicon.ico") {
       response.writeHead(404, corsHeaders());
       response.end();
@@ -488,60 +496,114 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    try {
-      const config = await fetchConfig();
-      const channelInfo = config[path];
+    let processedM3u8 = "";
 
-      if (!channelInfo || !channelInfo.url) {
-        if (cached && cached.content) {
-          response.writeHead(200, {
-            ...corsHeaders(),
-            "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
-          });
-          response.end(cached.content);
+    try {
+      // 1. ДИНАМИЧЕСКИЙ ЗАПРОС ДЛЯ ЛИМЕ-КАНАЛОВ (С IP LAYERO)
+      if (LIME_CHANNELS[path]) {
+        const ch = LIME_CHANNELS[path];
+        const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
+        const apiRes = await fetchWithRetry(apiUrl, { headers: getHeaders(apiUrl) }, 3, 5000);
+        
+        if (!apiRes.ok) throw new Error(`Lime API status ${apiRes.status}`);
+        const apiData = await apiRes.json();
+
+        // Рекурсивный поиск master m3u8 ссылки
+        let masterUrl = null;
+        const findMaster = (obj) => {
+          if (masterUrl) return;
+          if (typeof obj === 'string' && obj.startsWith('http') && obj.includes('index.m3u8')) {
+            masterUrl = obj;
+            return;
+          }
+          if (typeof obj === 'object' && obj !== null) {
+            for (let val of Object.values(obj)) findMaster(val);
+          }
+        };
+        findMaster(apiData);
+
+        if (!masterUrl) throw new Error("Master URL not found in Lime API");
+
+        const masterRes = await fetchWithRetry(masterUrl, { headers: getHeaders(masterUrl) }, 3, 5000);
+        const masterText = await masterRes.text();
+
+        // Парсинг потоков (выбираем оптимальный битрейт, аналогично Python логике)
+        const lines = masterText.split(/\r?\n/);
+        let streams = [];
+        let currentInf = null;
+        for (let line of lines) {
+          line = line.trim();
+          if (line.startsWith("#EXT-X-STREAM-INF:")) {
+            currentInf = line;
+            continue;
+          }
+          if (currentInf && line && !line.startsWith("#")) {
+            const bwMatch = currentInf.match(/BANDWIDTH=(\d+)/);
+            const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+            streams.push({ bandwidth: bw, url: new URL(line, masterUrl).toString() });
+            currentInf = null;
+          }
+        }
+
+        // Сортировка от большего к меньшему и выбор 3-го варианта (или минимального)
+        streams.sort((a, b) => b.bandwidth - a.bandwidth);
+        let selectedStreamUrl = masterUrl;
+        if (streams.length >= 3) {
+          selectedStreamUrl = streams[2].url;
+        } else if (streams.length > 0) {
+          selectedStreamUrl = streams[streams.length - 1].url;
+        }
+
+        const subRes = await fetchWithRetry(selectedStreamUrl, { headers: getHeaders(selectedStreamUrl) }, 3, 5000);
+        const rawM3u8 = await subRes.text();
+        processedM3u8 = resolveM3u8Urls(rawM3u8, selectedStreamUrl, devKey);
+
+      } else {
+        // 2. СТАНДАРТНЫЙ ЗАПРОС ИЗ КОНФИГОВ ДЛЯ ОСТАЛЬНЫХ КАНАЛОВ
+        const config = await fetchConfig();
+        const channelInfo = config[path];
+
+        if (!channelInfo || !channelInfo.url) {
+          if (cached && cached.content) {
+            response.writeHead(200, {
+              ...corsHeaders(),
+              "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+            });
+            response.end(cached.content);
+            return;
+          }
+          response.writeHead(503, corsHeaders());
+          response.end();
           return;
         }
 
-        response.writeHead(503, corsHeaders());
-        response.end();
-        return;
+        if (channelInfo.provider === "vitrina") {
+          const streamResponse = await fetchWithRetry(
+            channelInfo.url,
+            { headers: getVitrinaHeaders() },
+            3,
+            5000
+          );
+          if (!streamResponse.ok) throw new Error(`Vitrina status ${streamResponse.status}`);
+          const rawM3u8 = await streamResponse.text();
+          processedM3u8 = rewriteVitrinaPlaylist(rawM3u8, channelInfo.url);
+        } else {
+          const streamResponse = await fetchWithRetry(
+            channelInfo.url, 
+            { headers: getHeaders(channelInfo.url) },
+            3,
+            5000
+          );
+          if (!streamResponse.ok) throw new Error(`CDN status ${streamResponse.status}`);
+          const rawM3u8 = await streamResponse.text();
+          processedM3u8 = resolveM3u8Urls(rawM3u8, channelInfo.url, devKey);
+        }
       }
 
-      let processedM3u8 = "";
-
-      if (channelInfo.provider === "vitrina") {
-        const streamResponse = await fetchWithRetry(
-          channelInfo.url,
-          { headers: getVitrinaHeaders() },
-          3,
-          5000
-        );
-
-        if (!streamResponse.ok) {
-          throw new Error(`Vitrina status ${streamResponse.status}`);
-        }
-
-        const rawM3u8 = await streamResponse.text();
-        processedM3u8 = rewriteVitrinaPlaylist(rawM3u8, channelInfo.url);
-      } else {
-        const streamResponse = await fetchWithRetry(
-          channelInfo.url, 
-          { headers: getHeaders(channelInfo.url) },
-          3,
-          5000
-        );
-
-        if (!streamResponse.ok) {
-          throw new Error(`CDN status ${streamResponse.status}`);
-        }
-
-        const rawM3u8 = await streamResponse.text();
-        processedM3u8 = resolveM3u8Urls(rawM3u8, channelInfo.url, devKey);
-      }
-
+      // Кэшируем результат на 30 секунд для снижения нагрузки на API
       m3u8Cache.set(cachedKey, {
         content: processedM3u8,
-        expiresAt: now + 1000,
+        expiresAt: now + 30000,
       });
 
       response.writeHead(200, {
@@ -549,6 +611,7 @@ const server = http.createServer(async (request, response) => {
         "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
       });
       response.end(processedM3u8);
+
     } catch (error) {
       console.error(`Error fetching M3U8 for ${path}:`, error.message, error.cause ? `| Cause: ${error.cause.message || error.cause.code}` : '');
       
