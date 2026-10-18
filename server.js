@@ -32,7 +32,7 @@ const LIME_WEB_AGENT = JSON.stringify({
   device_id: DEVICE_ID,
 });
 
-// Используем обычные одинарные кавычки вместо бэктиков
+// Куки строго на одной сплошной строке без разрывов
 const LIME_COOKIE = 'spid=1789471753211_d24206d2c501aed0b81a419ebedde60a_ksiknrov2hn12wqe; ff-session-id=1789471760557353620299; _ym_uid=1789471766597734341; _ym_d=1789471766; _ymab_param=bDdwj7T-XI7UGbsLUVRzfn3WFleSnNVvToQ6yzYQrxvMqNZqUmlWDsz0B-CZ63tVFUV70VQcRG9zVvjFfqoAJSmdg5Y; cookieIsAgree=true; userRegionCode=65; showDemoModal=1; isPincodeDisabled=false; profileMode=parent; deviceId=448182.66555409547-1790167864304; lastChannel=tvc; yandex_extid_last_sync=2026-10-12T10%3A28%3A02.703Z; sessionId=17921728724711389342711; appGuid=746ac552-8fb9-45e9-a58b-10554f7aed85; __ai_fp_uuid=1cb3ecaece957bb7%3A1; ma_id=4916097261792172895740; __upin=vEJkXWpCw1zNlCOzW/jsuA; ma_id_api=tmSLo/unyy1ItqiFXRmu1OjJuoBJbc5dT5ifm+Gr93wfXt+TBhH4fBlOi18x/D9hl5Tif/8+hgOt9GAtk+Rsyuyr1d1DN209x0mzUpITAWCOz36RKh7h9w0xDIxixUzhoVY/oXxmcSYrWIFKCOxzNTzYxhXCveFIF1CYzI0cI50Nd8qEiYZcKhRNTXB3R0b5htQ+SzVMdFD1MmYdpa9/0zgJbD2AbOlpUMhKvyvz3vDCduCnkGWXLvFf8RMJJIEWSthr8RnzwVcgTbJRv63x23qdvdwfYYum9tktxjlrUWU2Hik9Y4jZu+91RM1m/segJlEW0fB2IzyARrGNbusUEg==; _buzz_aidata=JTdCJTIydWZwJTIyJTNBJTIydkVKa1hXcEN3MXpObENPelclMkZqc3VBJTIyJTJDJTIyYnJvd3NlclZlcnNpb24lMjIlM0ElMjIxNTUuMCUyMiUyQyUyMnRzQ3JlYXRlZCUyMiUzQTE3OTIxNzI4OTc0MjQlN0Q=; _buzz_mtsa=JTdCJTIydWZwJTIyJTNBJTIyMTY4NTQxZmExMmRhZGEyNTMxNTc2ZDkyN2NkMjg2YTglMjIlMkMlMjJicm93c2VyVmVyc2lvbiUyMiUzQSUyMjE1NS4wJTIyJTJDJTIydHNDcmVhdGVkJTIyJTNBMTc5MjE3Ijg5ODAzMyU3RA==; _ym_isad=2; limeSocDem=%7B%22mh_user_id%22%3A%22746ac552-8fb9-45e9-a58b-10554f7aed85%22%2C%22status%22%3A%22success%22%2C%22socio_demographics%22%3A%5B%7B%221%22%3A%226%22%2C%222%22%3A%2215%22%2C%2218%22%3A%22105%22%2C%22member_id%22%3A1%2C%22priority%22%3A1%7D%5D%2C%22recheck_on_channel_change%22%3Atrue%2C%22expiry_date%22%3A%222026-10-18T10%3A09%3A14Z%22%7D; spjs=1792318998688_37126423_0f8e933c_9773db7ec7685d431f2ecf098b593cf9_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; spsc=1792318998688_640068b6c5cd059d2f162492f294d9f0_jYr2DyHU6Xh-KTnBMQZv3uMP7RF9GfcmSkAhYP2knwsZ; spcaphp=eyJpdiI6ImpRbVZpb3J4SnR2WEZmQ0Z4VzV0TFE9PSIsInZhbHVlIjoiZXJwWnd1dFBrSFFuTFVsUnAzbnVcL3Bvekl2Q0ptTE5jTFoxWkpZTnp6alBXa2tLUFM4SlN4eStERk02bkVIRkV6alwvXC9nUUFPRm04TWNrVjM0NDBQTUM3WmdzK1RaWlphR01ibm53MTdyNUE9IiwibWFjIjoiM2JmYjIyZTJlOGNlNDc2NWEzNWIwYWMyMDE0Y2VkNzc1MDY1MTVmNGMwZmQzODIzZDgzMmJkNjk2N2U5YWFjNSJ9; spca=1792318998688_d3b484b457f0cab86a0fe62a82408925_jYr2DyHU6Xh-KTnBMQZv3uMP7RF9GfcmSkAhYP2knwsZ_Wod2UvXMCW4a5ujGn6YaXg; nuxt-color-mode=system; nuxt-session=Fe26.2**f02124a10a5847ef06c36b8bd2928147f651ec48b18fcaff2ca7edd08c656ed8*Hhx36BSc3N4cGinmL-mqNg*fnRUjX_lfVhxkpVY9P65MWCMKo_m76jji6Zdp5loh7rt7pHXRyPjStnFoPu3oHQgNT3GvSzRpe-B8ah70XkjwREiDKlIg8Y_vhjJPG-41UEXfwgjk-lQ79Tf3PGHPnKQ**4f5d6593a63fcc1661ff17b805dc4bb97620f5ad0bf706b007fddeea3a768695*lphdcTLH04IfNnMiVIRoNtLtNl6GzhhLvw31JvbgVv0';
 
 const VITRINA_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 8.0.1;)";
@@ -161,3 +161,338 @@ async function fetchAllowedDevices() {
   if (!DEVICES_CONFIG_URL) return;
   try {
     const res = await fetchTextWithRetry(DEVICES_CONFIG_URL, { "Cache-Control": "no-cache" }, 2);
+    if (res.ok) {
+      const devicesArray = JSON.parse(res.text);
+      if (Array.isArray(devicesArray)) {
+        ALLOWED_DEVICES = new Set(devicesArray.map((d) => String(d).trim()));
+      }
+    }
+  } catch (e) {
+    console.error("[Devices] Ошибка загрузки ключей:", e.message);
+  }
+}
+
+async function fetchOtherConfigs() {
+  const now = Date.now();
+  if (otherConfigCache.data && (now - otherConfigCache.fetchedAt < 30 * 60 * 1000)) {
+    return otherConfigCache.data;
+  }
+
+  const [winkRes, vitrinaRes] = await Promise.allSettled([
+    fetchTextWithRetry(WINK_CONFIG_URL, { "Cache-Control": "no-cache" }, 3),
+    fetchTextWithRetry(VITRINA_CONFIG_URL, { "User-Agent": VITRINA_USER_AGENT }, 3),
+  ]);
+
+  let winkData = {};
+  let vitrinaData = {};
+
+  if (winkRes.status === "fulfilled" && winkRes.value.ok) {
+    try { winkData = JSON.parse(winkRes.value.text); } catch (e) {}
+  }
+  if (vitrinaRes.status === "fulfilled" && vitrinaRes.value.ok) {
+    try { vitrinaData = JSON.parse(vitrinaRes.value.text); } catch (e) {}
+  }
+
+  const combined = {};
+  for (const [ch, url] of Object.entries(winkData)) combined[ch] = { url, provider: "wink" };
+  for (const [ch, url] of Object.entries(vitrinaData)) combined[ch] = { url, provider: "vitrina" };
+
+  otherConfigCache = { data: combined, fetchedAt: now };
+  return combined;
+}
+
+setInterval(() => fetchAllowedDevices().catch(() => {}), 10 * 60 * 1000);
+setInterval(() => { m3u8Cache.clear(); }, 60 * 60 * 1000);
+
+function isM3u8Url(urlStr) {
+  try {
+    const parsed = new URL(urlStr);
+    return parsed.pathname.endsWith(".m3u8") || parsed.pathname.includes(".m3u8") || parsed.search.includes(".m3u8");
+  } catch {
+    return urlStr.includes(".m3u8");
+  }
+}
+
+function resolveM3u8Urls(m3u8Text, baseUrlStr, devKey = "") {
+  const baseUrl = new URL(baseUrlStr);
+  const lines = m3u8Text.split("\n");
+  const devParam = devKey ? `&dev=${encodeURIComponent(devKey)}` : "";
+
+  return lines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return line;
+
+    if (trimmed.startsWith("#")) {
+      return line.replace(/URI=["']([^"']+)["']/g, (match, relativeUri) => {
+        try {
+          const absoluteUri = new URL(relativeUri, baseUrl).toString();
+          const endpoint = isM3u8Url(absoluteUri) ? "/proxy-m3u8" : "/proxy-segment";
+          return `URI="${endpoint}?url=${encodeURIComponent(absoluteUri)}${devParam}"`;
+        } catch {
+          return match;
+        }
+      });
+    }
+
+    try {
+      const absoluteUri = new URL(trimmed, baseUrl).toString();
+      const endpoint = isM3u8Url(absoluteUri) ? "/proxy-m3u8" : "/proxy-segment";
+      return `${endpoint}?url=${encodeURIComponent(absoluteUri)}${devParam}`;
+    } catch {
+      return line;
+    }
+  }).join("\n");
+}
+
+function rewriteVitrinaPlaylist(m3u8Text, targetUrl) {
+  let baseUrl;
+  try { baseUrl = new URL(targetUrl); } catch { return m3u8Text; }
+
+  return m3u8Text.split(/\r?\n/).map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return line;
+    if (trimmed.startsWith("#") && trimmed.includes('URI="')) {
+      return line.replace(/URI="([^"]+)"/g, (match, uri) => {
+        try { return `URI="${new URL(uri, baseUrl).toString()}"`; } catch { return match; }
+      });
+    }
+    if (!trimmed.startsWith("#")) {
+      try { return new URL(trimmed, baseUrl).toString(); } catch { return line; }
+    }
+    return line;
+  }).join("\n");
+}
+
+// ======================================================
+// SERVER
+// ======================================================
+const server = http.createServer(async (request, response) => {
+  try {
+    const hostHeader = request.headers.host || "localhost";
+    const url = new URL(request.url, `http://${hostHeader}`);
+
+    if (request.method === "OPTIONS") {
+      response.writeHead(204, corsHeaders());
+      response.end();
+      return;
+    }
+
+    if (url.pathname === "/robots.txt") {
+      response.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
+      response.end("User-agent: *\nDisallow: /");
+      return;
+    }
+
+    if (url.pathname === "/" || url.pathname === "") {
+      response.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
+      response.end("Lime Synced Auth Proxy is running.");
+      return;
+    }
+
+    if (url.pathname.includes("__layero_probe") || url.pathname === "/favicon.ico") {
+      response.writeHead(404, corsHeaders());
+      response.end();
+      return;
+    }
+
+    if (url.pathname.startsWith("/debug/")) {
+      const channelKey = url.pathname.replace("/debug/", "");
+      response.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json; charset=utf-8" });
+
+      if (!LIME_CHANNELS[channelKey]) {
+        response.end(JSON.stringify({ error: `Channel '${channelKey}' not found` }, null, 2));
+        return;
+      }
+
+      const ch = LIME_CHANNELS[channelKey];
+      const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
+
+      try {
+        const apiRes = await fetchTextWithRetry(apiUrl, getLimeHeaders(apiUrl), 2);
+        response.end(JSON.stringify({ channel: channelKey, apiUrl, status: apiRes.status, response: JSON.parse(apiRes.text) }, null, 2));
+      } catch (err) {
+        response.end(JSON.stringify({ channel: channelKey, error: err.message }, null, 2));
+      }
+      return;
+    }
+
+    const devKey = url.searchParams.get("dev");
+    if (DEVICES_CONFIG_URL && ALLOWED_DEVICES.size > 0) {
+      if (!devKey || !ALLOWED_DEVICES.has(devKey)) {
+        response.writeHead(403, corsHeaders());
+        response.end("Access Denied: Invalid device key");
+        return;
+      }
+    }
+
+    if (url.pathname === "/proxy-m3u8") {
+      const targetUrl = url.searchParams.get("url");
+      if (!targetUrl) {
+        response.writeHead(400, corsHeaders());
+        response.end();
+        return;
+      }
+
+      try {
+        const subRes = await fetchTextWithRetry(targetUrl, getLimeHeaders(targetUrl));
+        const processedM3u8 = resolveM3u8Urls(subRes.text, targetUrl, devKey);
+
+        response.writeHead(200, {
+          ...corsHeaders(),
+          "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+        });
+        response.end(processedM3u8);
+      } catch (e) {
+        console.error("Error proxying m3u8:", e.message);
+        response.writeHead(503, corsHeaders());
+        response.end();
+      }
+      return;
+    }
+
+    if (url.pathname === "/proxy-segment") {
+      const targetUrl = url.searchParams.get("url");
+      if (!targetUrl) {
+        response.writeHead(400, corsHeaders());
+        response.end();
+        return;
+      }
+
+      const reqHeaders = getLimeHeaders(targetUrl);
+      if (request.headers["range"]) {
+        reqHeaders["Range"] = request.headers["range"];
+      }
+
+      try {
+        const upstreamRes = await robustFetch(targetUrl, reqHeaders, "GET", 12000);
+        
+        const resHeaders = {
+          ...corsHeaders(),
+          "Content-Type": upstreamRes.headers["content-type"] || "video/mp2t",
+        };
+        if (upstreamRes.headers["content-length"]) resHeaders["Content-Length"] = upstreamRes.headers["content-length"];
+        if (upstreamRes.headers["content-range"]) resHeaders["Content-Range"] = upstreamRes.headers["content-range"];
+
+        response.writeHead(upstreamRes.statusCode || 200, resHeaders);
+        upstreamRes.pipe(response);
+      } catch (e) {
+        console.error("Error proxying segment:", e.message);
+        response.writeHead(503, corsHeaders());
+        response.end();
+      }
+      return;
+    }
+
+    const path = url.pathname.replace(/^\/+/, "").replace(/\.m3u8$/i, "");
+    const now = Date.now();
+    const cachedKey = `${path}_${devKey}`;
+    const cached = m3u8Cache.get(cachedKey);
+
+    if (cached && now < cached.expiresAt) {
+      response.writeHead(200, {
+        ...corsHeaders(),
+        "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+      });
+      response.end(cached.content);
+      return;
+    }
+
+    let processedM3u8 = "";
+
+    try {
+      let masterUrl = null;
+      let provider = "lime";
+
+      if (LIME_CHANNELS[path]) {
+        const ch = LIME_CHANNELS[path];
+        const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
+        const apiRes = await fetchTextWithRetry(apiUrl, getLimeHeaders(apiUrl), 3);
+        const apiData = JSON.parse(apiRes.text);
+
+        masterUrl = apiData.url || (apiData.stream && apiData.stream.common) || null;
+
+        if (!masterUrl) {
+          const findMaster = (obj) => {
+            if (masterUrl) return;
+            if (typeof obj === 'string' && obj.startsWith('http') && obj.includes('index.m3u8')) {
+              masterUrl = obj;
+              return;
+            }
+            if (typeof obj === 'object' && obj !== null) {
+              for (let val of Object.values(obj)) findMaster(val);
+            }
+          };
+          findMaster(apiData);
+        }
+
+        if (!masterUrl) throw new Error("Master URL not found in Lime API response");
+        console.log(`[Lime] Мастер-ссылка для ${path}: ${masterUrl}`);
+
+      } else {
+        const otherMap = await fetchOtherConfigs();
+        const channelInfo = otherMap[path];
+
+        if (!channelInfo || !channelInfo.url) {
+          if (cached && cached.content) {
+            response.writeHead(200, {
+              ...corsHeaders(),
+              "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+            });
+            response.end(cached.content);
+            return;
+          }
+          response.writeHead(404, corsHeaders());
+          response.end("Channel not found");
+          return;
+        }
+
+        masterUrl = channelInfo.url;
+        provider = channelInfo.provider || "wink";
+      }
+
+      if (provider === "vitrina") {
+        const streamRes = await fetchTextWithRetry(masterUrl, getVitrinaHeaders(), 3);
+        processedM3u8 = rewriteVitrinaPlaylist(streamRes.text, masterUrl);
+      } else {
+        const streamRes = await fetchTextWithRetry(masterUrl, getLimeHeaders(masterUrl), 3);
+        processedM3u8 = resolveM3u8Urls(streamRes.text, masterUrl, devKey);
+      }
+
+      m3u8Cache.set(cachedKey, {
+        content: processedM3u8,
+        expiresAt: now + 20000,
+      });
+
+      response.writeHead(200, {
+        ...corsHeaders(),
+        "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+      });
+      response.end(processedM3u8);
+
+    } catch (error) {
+      console.error(`Error fetching M3U8 for ${path}:`, error.message);
+      
+      if (cached && cached.content) {
+        response.writeHead(200, {
+          ...corsHeaders(),
+          "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+        });
+        response.end(cached.content);
+        return;
+      }
+
+      response.writeHead(503, corsHeaders());
+      response.end();
+    }
+  } catch (error) {
+    console.error("Unhandled Server Error:", error);
+    response.writeHead(500, corsHeaders());
+    response.end();
+  }
+});
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Lime Synced Auth Proxy listening on port ${PORT}`);
+  fetchOtherConfigs().catch(() => {});
+  fetchAllowedDevices().catch(() => {});
+});
