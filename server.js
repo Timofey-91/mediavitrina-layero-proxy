@@ -24,7 +24,7 @@ const LIME_CHANNELS = {
 };
 
 // ======================================================
-// HEADERS & AGENTS (Из Lua-скрипта Nexterr/NEKTO666)
+// HEADERS & AGENTS (Веб-заголовки из Lua-скрипта)
 // ======================================================
 const LIME_WEB_AGENT = JSON.stringify({
   platform: "web",
@@ -61,18 +61,18 @@ function isWinkUrl(targetUrl) {
   );
 }
 
-function getHeaders(targetUrl) {
+// Заголовки с приоритетом под веб-платформу
+function getWebHeaders(targetUrl = "") {
   const baseHeaders = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
     "Pragma": "no-cache",
     "Expires": "0",
   };
 
-  if (isWinkUrl(targetUrl)) {
+  if (targetUrl && isWinkUrl(targetUrl)) {
     return {
       ...baseHeaders,
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       "Referer": "https://wink.ru/",
       "Origin": "https://wink.ru",
       "Accept": "*/*",
@@ -152,7 +152,6 @@ async function fetchAllowedDevices() {
   }
 }
 
-// Загрузчик прочих конфигов (Wink / Vitrina)
 async function fetchOtherConfigs() {
   const now = Date.now();
   if (otherConfigCache.data && (now - otherConfigCache.fetchedAt < 30 * 60 * 1000)) {
@@ -276,13 +275,60 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/" || url.pathname === "") {
       response.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Lime API v4 + All-in-One TV Proxy is running.");
+      response.end("Lime API v4 (Web Headers) + Diagnostic Proxy is running.");
       return;
     }
 
     if (url.pathname.includes("__layero_probe") || url.pathname === "/favicon.ico") {
       response.writeHead(404, corsHeaders());
       response.end();
+      return;
+    }
+
+    // ======================================================
+    // ДИАГНОСТИЧЕСКИЙ ЭНДПОИНТ: /debug/<название_канала>
+    // Пример: https://your-app.layero.app/debug/tvc_plus2
+    // ======================================================
+    if (url.pathname.startsWith("/debug/")) {
+      const channelKey = url.pathname.replace("/debug/", "");
+      response.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json; charset=utf-8" });
+
+      if (!LIME_CHANNELS[channelKey]) {
+        response.end(JSON.stringify({ error: `Channel '${channelKey}' not found in LIME_CHANNELS` }, null, 2));
+        return;
+      }
+
+      const ch = LIME_CHANNELS[channelKey];
+      const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
+
+      try {
+        const apiRes = await fetchWithRetry(apiUrl, { headers: getWebHeaders(apiUrl) }, 2, 5000);
+        const apiText = await apiRes.text();
+        
+        let hasUrl = false;
+        let parsedJson = null;
+        try {
+          parsedJson = JSON.parse(apiText);
+          // Проверим, есть ли поле url в ответе
+          hasUrl = JSON.stringify(parsedJson).includes("http");
+        } catch (e) {}
+
+        response.end(JSON.stringify({
+          channel: channelKey,
+          apiUrl,
+          httpStatus: apiRes.status,
+          success: apiRes.ok,
+          hasUrlInResponse: hasUrl,
+          rawResponseSample: apiText.slice(0, 400),
+          parsedData: parsedJson
+        }, null, 2));
+      } catch (err) {
+        response.end(JSON.stringify({
+          channel: channelKey,
+          apiUrl,
+          error: err.message
+        }, null, 2));
+      }
       return;
     }
 
@@ -304,7 +350,7 @@ const server = http.createServer(async (request, response) => {
       }
 
       try {
-        const subRes = await fetchWithRetry(targetUrl, { headers: getHeaders(targetUrl) });
+        const subRes = await fetchWithRetry(targetUrl, { headers: getWebHeaders(targetUrl) });
         if (!subRes.ok) {
           response.writeHead(subRes.status, corsHeaders());
           response.end();
@@ -336,7 +382,7 @@ const server = http.createServer(async (request, response) => {
       }
 
       const isWink = isWinkUrl(targetUrl);
-      const reqHeaders = getHeaders(targetUrl);
+      const reqHeaders = getWebHeaders(targetUrl);
 
       if (isWink && request.headers["range"]) {
         reqHeaders["Range"] = request.headers["range"];
@@ -404,11 +450,11 @@ const server = http.createServer(async (request, response) => {
       let streamUrl = null;
       let provider = "lime";
 
-      // 1. ДИНАМИЧЕСКИЙ ЗАПРОС ЧЕРЕЗ API v4 ДЛЯ ТАЙМШИФТ КАНАЛОВ (tvc_plus2 и т.д.)
+      // 1. ДИНАМИЧЕСКИЙ ЗАПРОС ЧЕРЕЗ API v4 ДЛЯ ТАЙМШИФТ КАНАЛОВ (С веб-заголовками)
       if (LIME_CHANNELS[path]) {
         const ch = LIME_CHANNELS[path];
         const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
-        const apiRes = await fetchWithRetry(apiUrl, { headers: getHeaders(apiUrl) }, 3, 5000);
+        const apiRes = await fetchWithRetry(apiUrl, { headers: getWebHeaders(apiUrl) }, 3, 5000);
         
         if (!apiRes.ok) throw new Error(`Lime API status ${apiRes.status}`);
         const apiData = await apiRes.json();
@@ -429,10 +475,10 @@ const server = http.createServer(async (request, response) => {
 
         if (!masterUrl) throw new Error("Master URL not found in Lime API");
 
-        const masterRes = await fetchWithRetry(masterUrl, { headers: getHeaders(masterUrl) }, 3, 5000);
+        const masterRes = await fetchWithRetry(masterUrl, { headers: getWebHeaders(masterUrl) }, 3, 5000);
         const masterText = await masterRes.text();
 
-        // Парсинг потоков и выбор стабильного битрейта (480p / 3-й вариант, как в Python)
+        // Парсинг потоков и выбор стабильного битрейта (480p / 3-й вариант)
         const lines = masterText.split(/\r?\n/);
         let streams = [];
         let currentInf = null;
@@ -490,7 +536,7 @@ const server = http.createServer(async (request, response) => {
         const rawM3u8 = await streamResponse.text();
         processedM3u8 = rewriteVitrinaPlaylist(rawM3u8, streamUrl);
       } else {
-        streamResponse = await fetchWithRetry(streamUrl, { headers: getHeaders(streamUrl) }, 3, 5000);
+        streamResponse = await fetchWithRetry(streamUrl, { headers: getWebHeaders(streamUrl) }, 3, 5000);
         if (!streamResponse.ok) throw new Error(`Upstream status ${streamResponse.status}`);
         const rawM3u8 = await streamResponse.text();
         processedM3u8 = resolveM3u8Urls(rawM3u8, streamUrl, devKey);
