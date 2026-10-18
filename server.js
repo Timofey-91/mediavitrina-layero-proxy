@@ -24,7 +24,7 @@ const LIME_CHANNELS = {
 };
 
 // ======================================================
-// HEADERS & AGENTS (Имитация браузера на limehd.tv)
+// AGENTS & HEADERS (Разделение для API и CDN)
 // ======================================================
 const LIME_WEB_AGENT = JSON.stringify({
   platform: "web",
@@ -61,16 +61,26 @@ function isWinkUrl(targetUrl) {
   );
 }
 
-function getWebHeaders(targetUrl = "") {
-  const baseHeaders = {
+// Заголовки ТОЛЬКО для запросов к API Лайма (с x-lhd-agent)
+function getApiHeaders() {
+  return {
     "Cache-Control": "no-cache, no-store, must-revalidate",
     "Pragma": "no-cache",
     "Expires": "0",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "x-lhd-agent": LIME_WEB_AGENT,
+    "Referer": "https://limehd.tv/",
+    "Origin": "https://limehd.tv",
+    "Accept": "*/*",
+    "Connection": "keep-alive",
   };
+}
 
+// Чистые заголовки для CDN видеопотоков (БЕЗ x-lhd-agent)
+function getCdnHeaders(targetUrl = "") {
   if (targetUrl && isWinkUrl(targetUrl)) {
     return {
-      ...baseHeaders,
+      "Cache-Control": "no-cache, no-store, must-revalidate",
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
       "Referer": "https://wink.ru/",
       "Origin": "https://wink.ru",
@@ -80,13 +90,11 @@ function getWebHeaders(targetUrl = "") {
   }
 
   return {
-    ...baseHeaders,
+    "Cache-Control": "no-cache, no-store, must-revalidate",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "x-lhd-agent": LIME_WEB_AGENT,
     "Referer": "https://limehd.tv/",
     "Origin": "https://limehd.tv",
     "Accept": "*/*",
-    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
     "Sec-Fetch-Dest": "empty",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "cross-site",
@@ -275,7 +283,7 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/" || url.pathname === "") {
       response.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Lime Fixed Proxy is running.");
+      response.end("Lime CDN Proxy is running.");
       return;
     }
 
@@ -299,7 +307,7 @@ const server = http.createServer(async (request, response) => {
       const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
 
       try {
-        const apiRes = await fetchWithRetry(apiUrl, { headers: getWebHeaders(apiUrl) }, 2, 5000);
+        const apiRes = await fetchWithRetry(apiUrl, { headers: getApiHeaders() }, 2, 5000);
         const apiText = await apiRes.text();
         response.end(JSON.stringify({ channel: channelKey, apiUrl, status: apiRes.status, response: JSON.parse(apiText) }, null, 2));
       } catch (err) {
@@ -317,6 +325,7 @@ const server = http.createServer(async (request, response) => {
       }
     }
 
+    // Проксирование дочерних .m3u8 (с заголовками CDN)
     if (url.pathname === "/proxy-m3u8") {
       const targetUrl = url.searchParams.get("url");
       if (!targetUrl) {
@@ -326,7 +335,7 @@ const server = http.createServer(async (request, response) => {
       }
 
       try {
-        const subRes = await fetchWithRetry(targetUrl, { headers: getWebHeaders(targetUrl) });
+        const subRes = await fetchWithRetry(targetUrl, { headers: getCdnHeaders(targetUrl) });
         if (!subRes.ok) {
           response.writeHead(subRes.status, corsHeaders());
           response.end();
@@ -349,6 +358,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    // Проксирование видео-сегментов .ts (с заголовками CDN)
     if (url.pathname === "/proxy-segment") {
       const targetUrl = url.searchParams.get("url");
       if (!targetUrl) {
@@ -358,7 +368,7 @@ const server = http.createServer(async (request, response) => {
       }
 
       const isWink = isWinkUrl(targetUrl);
-      const reqHeaders = getWebHeaders(targetUrl);
+      const reqHeaders = getCdnHeaders(targetUrl);
 
       if (isWink && request.headers["range"]) {
         reqHeaders["Range"] = request.headers["range"];
@@ -426,20 +436,18 @@ const server = http.createServer(async (request, response) => {
       let masterUrl = null;
       let provider = "lime";
 
-      // 1. ДИНАМИЧЕСКИЙ ЗАПРОС К API LIME С ИЗВЛЕЧЕНИЕМ ССЫЛКИ ИЗ stream.common или url
+      // 1. ЗАПРОС К API ЛАЙМА (используем getApiHeaders с x-lhd-agent)
       if (LIME_CHANNELS[path]) {
         const ch = LIME_CHANNELS[path];
         const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
-        const apiRes = await fetchWithRetry(apiUrl, { headers: getWebHeaders(apiUrl) }, 3, 5000);
+        const apiRes = await fetchWithRetry(apiUrl, { headers: getApiHeaders() }, 3, 5000);
         
         if (!apiRes.ok) throw new Error(`Lime API status ${apiRes.status}`);
         const apiData = await apiRes.json();
 
-        // Точное извлечение ссылки из структуры ответа Лайма
         masterUrl = apiData.url || (apiData.stream && apiData.stream.common) || null;
 
         if (!masterUrl) {
-          // Запасной глубокий поиск, если структура вдруг изменится
           const findMaster = (obj) => {
             if (masterUrl) return;
             if (typeof obj === 'string' && obj.startsWith('http') && obj.includes('index.m3u8')) {
@@ -479,7 +487,7 @@ const server = http.createServer(async (request, response) => {
         provider = channelInfo.provider || "wink";
       }
 
-      // Скачиваем мастер-плейлист и переписываем все дочерние пути на наш прокси
+      // СКАЧИВАНИЕ С CDN (используем чистые getCdnHeaders БЕЗ x-lhd-agent)
       let streamResponse;
       if (provider === "vitrina") {
         streamResponse = await fetchWithRetry(masterUrl, { headers: getVitrinaHeaders() }, 3, 5000);
@@ -487,8 +495,8 @@ const server = http.createServer(async (request, response) => {
         const rawM3u8 = await streamResponse.text();
         processedM3u8 = rewriteVitrinaPlaylist(rawM3u8, masterUrl);
       } else {
-        streamResponse = await fetchWithRetry(masterUrl, { headers: getWebHeaders(masterUrl) }, 3, 5000);
-        if (!streamResponse.ok) throw new Error(`Upstream status ${streamResponse.status}`);
+        streamResponse = await fetchWithRetry(masterUrl, { headers: getCdnHeaders(masterUrl) }, 3, 5000);
+        if (!streamResponse.ok) throw new Error(`Upstream CDN status ${streamResponse.status}`);
         const rawM3u8 = await streamResponse.text();
         processedM3u8 = resolveM3u8Urls(rawM3u8, masterUrl, devKey);
       }
@@ -527,7 +535,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Lime Fixed Proxy listening on port ${PORT}`);
+  console.log(`Lime CDN Proxy listening on port ${PORT}`);
   fetchOtherConfigs().catch(() => {});
   fetchAllowedDevices().catch(() => {});
 });
