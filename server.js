@@ -16,7 +16,7 @@ const VITRINA_CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/config.json";
 
 // ======================================================
-// ДИНАМИЧЕСКИЕ КАНАЛЫ LIME
+// ДИНАМИЧЕСКИЕ КАНАЛЫ LIME (Android Profile)
 // ======================================================
 const LIME_CHANNELS = {
   "tvc_plus2": { id: 129, region: 66, tz: 5 },
@@ -24,16 +24,19 @@ const LIME_CHANNELS = {
   "tvc_plus6": { id: 129, region: 25, tz: 10 },
 };
 
-const DEVICE_ID = "448182.66555409547-1790167864304";
-
-const LIME_WEB_AGENT = JSON.stringify({
-  platform: "web",
-  app: "limehd.tv",
-  device_id: DEVICE_ID,
+// Android App Agent для Лайма из вашего примера
+const LIME_ANDROID_AGENT = JSON.stringify({
+  platform: "android",
+  app: "limehd.ru.ctvshka",
+  version_name: "5.1.0",
+  version_code: "388",
+  sdk: "34",
+  name: "Xiaomi 13 Ultra",
+  device_id: "a7f8e9d1c2b3a4f5",
+  is_huawei: "0"
 });
 
-// Только ключевые защитные куки (без лишней аналитики во избежание 431 ошибки)
-const LIME_COOKIE = 'deviceId=448182.66555409547-1790167864304; sessionId=17921728724711389342711; spcaphp=eyJpdiI6ImpRbVZpb3J4SnR2WEZmQ0Z4VzV0TFE9PSIsInZhbHVlIjoiZXJwWnd1dFBrSFFuTFVsUnAzbnVcL3Bvekl2Q0ptTE5jTFoxWkpZTnp6alBXa2tLUFM4SlN4eStERk02bkVIRkV6alwvXC9nUUFPRm04TWNrVjM0NDBQTUM3WmdzK1RaWlphR01ibm53MTdyNUE9IiwibWFjIjoiM2JmYjIyZTJlOGNlNDc2NWEzNWIwYWMyMDE0Y2VkNzc1MDY1MTVmNGMwZmQzODIzZDgzMmJkNjk2N2U5YWFjNSJ9; spca=1792318998688_d3b484b457f0cab86a0fe62a82408925_jYr2DyHU6Xh-KTnBMQZv3uMP7RF9GfcmSkAhYP2knwsZ_Wod2UvXMCW4a5ujGn6YaXg; spsc=1792318998688_640068b6c5cd059d2f162492f294d9f0_jYr2DyHU6Xh-KTnBMQZv3uMP7RF9GfcmSkAhYP2knwsZ; spjs=1792318998688_37126423_0f8e933c_9773db7ec7685d431f2ecf098b593cf9';
+const DEVICE_ID = "a7f8e9d1c2b3a4f5";
 
 const VITRINA_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 8.0.1;)";
 const VITRINA_REFERER = "https://player.mediavitrina.ru/";
@@ -64,11 +67,12 @@ function isWinkUrl(targetUrl) {
   );
 }
 
+// Заголовки под Android-приложение Лайма (никаких браузерных кук и капч)
 function getLimeHeaders(targetUrl = "") {
   if (targetUrl && isWinkUrl(targetUrl)) {
     return {
       "Cache-Control": "no-cache, no-store, must-revalidate",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
       "Referer": "https://wink.ru/",
       "Origin": "https://wink.ru",
       "Accept": "*/*",
@@ -80,17 +84,10 @@ function getLimeHeaders(targetUrl = "") {
     "Cache-Control": "no-cache, no-store, must-revalidate",
     "Pragma": "no-cache",
     "Expires": "0",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+    "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 14; Xiaomi 13 Ultra Build/UP1A.231005.007)",
     "x-device-id": DEVICE_ID,
-    "x-lhd-agent": LIME_WEB_AGENT,
-    "Referer": "https://limehd.tv/",
-    "Origin": "https://limehd.tv",
-    "Cookie": LIME_COOKIE,
+    "x-lhd-agent": LIME_ANDROID_AGENT,
     "Accept": "*/*",
-    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "cors",
-    "Sec-Fetch-Site": "cross-site",
     "Connection": "keep-alive",
   };
 }
@@ -251,7 +248,7 @@ function rewriteVitrinaPlaylist(m3u8Text, targetUrl) {
   return m3u8Text.split(/\r?\n/).map((line) => {
     const trimmed = line.trim();
     if (!trimmed) return line;
-    if (trimmed.startsWith("#" ) && trimmed.includes('URI="')) {
+    if (trimmed.startsWith("#") && trimmed.includes('URI="')) {
       return line.replace(/URI="([^"]+)"/g, (match, uri) => {
         try { return `URI="${new URL(uri, baseUrl).toString()}"`; } catch { return match; }
       });
@@ -285,7 +282,7 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/" || url.pathname === "") {
       response.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Lime Slim Auth Proxy is running.");
+      response.end("Lime Android Proxy is running.");
       return;
     }
 
@@ -405,6 +402,7 @@ const server = http.createServer(async (request, response) => {
 
       if (LIME_CHANNELS[path]) {
         const ch = LIME_CHANNELS[path];
+        // Запрос к API с Android-заголовками
         const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
         const apiRes = await fetchTextWithRetry(apiUrl, getLimeHeaders(apiUrl), 3);
         const apiData = JSON.parse(apiRes.text);
@@ -426,7 +424,7 @@ const server = http.createServer(async (request, response) => {
         }
 
         if (!masterUrl) throw new Error("Master URL not found in Lime API response");
-        console.log(`[Lime] Мастер-ссылка для ${path}: ${masterUrl}`);
+        console.log(`[Lime Android] Мастер-ссылка для ${path}: ${masterUrl}`);
 
       } else {
         const otherMap = await fetchOtherConfigs();
@@ -492,7 +490,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Lime Slim Auth Proxy listening on port ${PORT}`);
+  console.log(`Lime Android Proxy listening on port ${PORT}`);
   fetchOtherConfigs().catch(() => {});
   fetchAllowedDevices().catch(() => {});
 });
