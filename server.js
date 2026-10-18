@@ -6,11 +6,8 @@ const PORT = process.env.PORT || 3000;
 const DEVICES_CONFIG_URL = process.env.DEVICES_CONFIG_URL;
 
 // ======================================================
-// CONFIG URLS
+// CONFIG URLS (Для других провайдеров, если нужны)
 // ======================================================
-const LIME_CONFIG_URL =
-  "https://gitverse.ru/api/repos/Timofey91/peer_test/raw/branch/master/config.json";
-
 const WINK_CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/wink.json";
 
@@ -18,31 +15,22 @@ const VITRINA_CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/config.json";
 
 // ======================================================
-// LIME DYNAMIC CHANNELS (Генерация на лету с IP Layero)
+// LIME API SETTINGS (Из Lua-скрипта Nexterr/NEKTO666)
 // ======================================================
-const LIME_CHANNELS = {
-  "tvc_plus2": { id: 129, region: 66, tz: 5 },
-  "tvc_plus4": { id: 129, region: 54, tz: 7 },
-  "tvc_plus6": { id: 129, region: 25, tz: 10 },
-};
+const LIME_PLAYLIST_API = "https://pl.iptv2021.com/api/v1/playlist";
 
-// ======================================================
-// HEADERS & AGENTS
-// ======================================================
-const LHD_AGENT = JSON.stringify({
-  version_name: "1.0.2.203",
-  version_code: "203",
-  platform: "win",
-  device_id: "00000000",
-  app: "tv.limehd.win",
-  generation: "2",
+const LIME_WEB_AGENT = JSON.stringify({
+  platform: "web",
+  app: "limehd.tv",
+  device_id: "194973.63324970874-1785414641196",
 });
 
 const VITRINA_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 8.0.1;)";
 const VITRINA_REFERER = "https://player.mediavitrina.ru/";
 
 let ALLOWED_DEVICES = new Set();
-let configCache = { data: null, fetchedAt: 0 };
+let limeChannelsCache = { map: {}, fetchedAt: 0 };
+let otherConfigCache = { data: null, fetchedAt: 0 };
 const m3u8Cache = new Map();
 
 function corsHeaders() {
@@ -88,12 +76,11 @@ function getHeaders(targetUrl) {
 
   return {
     ...baseHeaders,
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "X-LHD-Agent": LHD_AGENT,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
+    "x-lhd-agent": LIME_WEB_AGENT,
     "Referer": "https://limehd.tv/",
     "Origin": "https://limehd.tv",
     "Accept": "*/*",
-    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
     "Connection": "keep-alive",
   };
 }
@@ -152,75 +139,87 @@ async function fetchAllowedDevices() {
       const devicesArray = await res.json();
       if (Array.isArray(devicesArray)) {
         ALLOWED_DEVICES = new Set(devicesArray.map((d) => String(d).trim()));
+        console.log(`[Devices] Загружено разрешенных ключей: ${ALLOWED_DEVICES.size}`);
       }
     }
   } catch (e) {
-    console.error("[Devices] Ошибка загрузки ключей из Gist:", e.message);
+    console.error("[Devices] Ошибка загрузки ключей:", e.message);
   }
 }
 
 // ======================================================
-// CONFIG LOADER
+// DINAMIC LIME CHANNELS LOADER (Прямо с плейлиста API)
 // ======================================================
-function getLatestResetTimestamp() {
-  const now = new Date();
-  const tashkentMs = now.getTime() + (5 * 3600 * 1000);
-  const tashkentDate = new Date(tashkentMs);
-  
-  const year = tashkentDate.getUTCFullYear();
-  const month = tashkentDate.getUTCMonth();
-  const day = tashkentDate.getUTCDate();
-  
-  const slot1Utc = Date.UTC(year, month, day, 3, 22, 0, 0);
-  const slot2Utc = Date.UTC(year, month, day, 15, 22, 0, 0);
-  
-  let lastResetTashkentUtc;
-  if (tashkentMs >= slot2Utc) {
-    lastResetTashkentUtc = slot2Utc;
-  } else if (tashkentMs >= slot1Utc) {
-    lastResetTashkentUtc = slot1Utc;
-  } else {
-    lastResetTashkentUtc = Date.UTC(year, month, day - 1, 15, 22, 0, 0);
+async function fetchLimeChannels() {
+  const now = Date.now();
+  // Кэшируем список каналов Lime на 5 минут, чтобы не бомбить API при переключении каналов
+  if (limeChannelsCache.map && Object.keys(limeChannelsCache.map).length > 0 && (now - limeChannelsCache.fetchedAt < 5 * 60 * 1000)) {
+    return limeChannelsCache.map;
   }
-  
-  return lastResetTashkentUtc - (5 * 3600 * 1000);
+
+  try {
+    const res = await fetchWithRetry(
+      LIME_PLAYLIST_API,
+      { headers: getHeaders(LIME_PLAYLIST_API) },
+      3,
+      6000
+    );
+
+    if (!res.ok) throw new Error(`Lime playlist HTTP status ${res.status}`);
+    
+    const data = await res.json();
+    const channelsMap = {};
+
+    if (data && Array.isArray(data.channels)) {
+      for (const ch of data.channels) {
+        // Используем id канала (например, 129 или строковый адрес) как ключ поиска
+        if (ch.address && ch.url) {
+          channelsMap[ch.address] = {
+            url: ch.url,
+            name: ch.name_ru,
+            provider: "lime",
+          };
+        }
+        // Дополнительно дублируем по числовому ID на случай запросов вида /129
+        if (ch.id && ch.url) {
+          channelsMap[String(ch.id)] = {
+            url: ch.url,
+            name: ch.name_ru,
+            provider: "lime",
+          };
+        }
+      }
+    }
+
+    if (Object.keys(channelsMap).length > 0) {
+      limeChannelsCache = {
+        map: channelsMap,
+        fetchedAt: now,
+      };
+      console.log(`[LimeAPI] Успешно загружено каналов: ${Object.keys(channelsMap).length}`);
+    }
+  } catch (e) {
+    console.error("[LimeAPI] Ошибка получения динамического плейлиста:", e.message);
+  }
+
+  return limeChannelsCache.map;
 }
 
-async function fetchConfig(forceRefresh = false) {
-  const lastResetTime = getLatestResetTimestamp();
-
-  if (!forceRefresh && configCache.data && configCache.fetchedAt >= lastResetTime) {
-    return configCache.data;
+// Загрузчик прочих конфигов (Wink / Vitrina)
+async function fetchOtherConfigs() {
+  const now = Date.now();
+  if (otherConfigCache.data && (now - otherConfigCache.fetchedAt < 30 * 60 * 1000)) {
+    return otherConfigCache.data;
   }
 
-  const [limeRes, winkRes, vitrinaRes] = await Promise.allSettled([
-    fetchWithRetry(
-      LIME_CONFIG_URL,
-      { headers: { "Cache-Control": "no-cache, no-store", "User-Agent": "Mozilla/5.0", "X-LHD-Agent": LHD_AGENT } },
-      3,
-      5000
-    ),
-    fetchWithRetry(
-      WINK_CONFIG_URL,
-      { headers: { "Cache-Control": "no-cache, no-store", "User-Agent": "Mozilla/5.0" } },
-      3,
-      5000
-    ),
-    fetchWithRetry(
-      VITRINA_CONFIG_URL,
-      { headers: { "Cache-Control": "no-cache, no-store", "User-Agent": VITRINA_USER_AGENT } },
-      3,
-      5000
-    ),
+  const [winkRes, vitrinaRes] = await Promise.allSettled([
+    fetchWithRetry(WINK_CONFIG_URL, { headers: { "Cache-Control": "no-cache" } }, 3, 5000),
+    fetchWithRetry(VITRINA_CONFIG_URL, { headers: { "Cache-Control": "no-cache", "User-Agent": VITRINA_USER_AGENT } }, 3, 5000),
   ]);
 
-  let limeData = {};
   let winkData = {};
   let vitrinaData = {};
 
-  if (limeRes.status === "fulfilled" && limeRes.value.ok) {
-    try { limeData = await limeRes.value.json(); } catch (e) {}
-  }
   if (winkRes.status === "fulfilled" && winkRes.value.ok) {
     try { winkData = await winkRes.value.json(); } catch (e) {}
   }
@@ -228,41 +227,21 @@ async function fetchConfig(forceRefresh = false) {
     try { vitrinaData = await vitrinaRes.value.json(); } catch (e) {}
   }
 
-  const combinedMap = {};
+  const combined = {};
+  for (const [ch, url] of Object.entries(winkData)) combined[ch] = { url, provider: "wink" };
+  for (const [ch, url] of Object.entries(vitrinaData)) combined[ch] = { url, provider: "vitrina" };
 
-  for (const [ch, url] of Object.entries(limeData)) {
-    combinedMap[ch] = { url, provider: "lime" };
-  }
-  for (const [ch, url] of Object.entries(winkData)) {
-    combinedMap[ch] = { url, provider: "wink" };
-  }
-  for (const [ch, url] of Object.entries(vitrinaData)) {
-    combinedMap[ch] = { url, provider: "vitrina" };
-  }
-
-  if (Object.keys(combinedMap).length > 0) {
-    configCache = {
-      data: combinedMap,
-      fetchedAt: Date.now(),
-    };
-  }
-
-  return configCache.data || combinedMap;
+  otherConfigCache = { data: combined, fetchedAt: now };
+  return combined;
 }
 
 setInterval(() => fetchAllowedDevices().catch(() => {}), 10 * 60 * 1000);
-setInterval(() => {
-  m3u8Cache.clear();
-}, 60 * 60 * 1000);
+setInterval(() => { m3u8Cache.clear(); }, 60 * 60 * 1000);
 
 function isM3u8Url(urlStr) {
   try {
     const parsed = new URL(urlStr);
-    return (
-      parsed.pathname.endsWith(".m3u8") ||
-      parsed.pathname.includes(".m3u8") ||
-      parsed.search.includes(".m3u8")
-    );
+    return parsed.pathname.endsWith(".m3u8") || parsed.pathname.includes(".m3u8") || parsed.search.includes(".m3u8");
   } catch {
     return urlStr.includes(".m3u8");
   }
@@ -271,13 +250,12 @@ function isM3u8Url(urlStr) {
 // ======================================================
 // REWRITERS
 // ======================================================
-
 function resolveM3u8Urls(m3u8Text, baseUrlStr, devKey = "") {
   const baseUrl = new URL(baseUrlStr);
   const lines = m3u8Text.split("\n");
   const devParam = devKey ? `&dev=${encodeURIComponent(devKey)}` : "";
 
-  const resolvedLines = lines.map((line) => {
+  return lines.map((line) => {
     const trimmed = line.trim();
     if (!trimmed) return line;
 
@@ -285,9 +263,7 @@ function resolveM3u8Urls(m3u8Text, baseUrlStr, devKey = "") {
       return line.replace(/URI=["']([^"']+)["']/g, (match, relativeUri) => {
         try {
           const absoluteUri = new URL(relativeUri, baseUrl).toString();
-          const endpoint = isM3u8Url(absoluteUri)
-            ? "/proxy-m3u8"
-            : "/proxy-segment";
+          const endpoint = isM3u8Url(absoluteUri) ? "/proxy-m3u8" : "/proxy-segment";
           return `URI="${endpoint}?url=${encodeURIComponent(absoluteUri)}${devParam}"`;
         } catch {
           return match;
@@ -297,16 +273,12 @@ function resolveM3u8Urls(m3u8Text, baseUrlStr, devKey = "") {
 
     try {
       const absoluteUri = new URL(trimmed, baseUrl).toString();
-      const endpoint = isM3u8Url(absoluteUri)
-        ? "/proxy-m3u8"
-        : "/proxy-segment";
+      const endpoint = isM3u8Url(absoluteUri) ? "/proxy-m3u8" : "/proxy-segment";
       return `${endpoint}?url=${encodeURIComponent(absoluteUri)}${devParam}`;
     } catch {
       return line;
     }
-  });
-
-  return resolvedLines.join("\n");
+  }).join("\n");
 }
 
 function rewriteVitrinaPlaylist(m3u8Text, targetUrl) {
@@ -317,33 +289,22 @@ function rewriteVitrinaPlaylist(m3u8Text, targetUrl) {
     return m3u8Text;
   }
 
-  return m3u8Text
-    .split(/\r?\n/)
-    .map((line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return line;
+  return m3u8Text.split(/\r?\n/).map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return line;
 
-      if (trimmed.startsWith("#") && trimmed.includes('URI="')) {
-        return line.replace(/URI="([^"]+)"/g, (match, uri) => {
-          try {
-            return `URI="${new URL(uri, baseUrl).toString()}"`;
-          } catch {
-            return match;
-          }
-        });
-      }
+    if (trimmed.startsWith("#") && trimmed.includes('URI="')) {
+      return line.replace(/URI="([^"]+)"/g, (match, uri) => {
+        try { return `URI="${new URL(uri, baseUrl).toString()}"`; } catch { return match; }
+      });
+    }
 
-      if (!trimmed.startsWith("#")) {
-        try {
-          return new URL(trimmed, baseUrl).toString();
-        } catch {
-          return line;
-        }
-      }
+    if (!trimmed.startsWith("#")) {
+      try { return new URL(trimmed, baseUrl).toString(); } catch { return line; }
+    }
 
-      return line;
-    })
-    .join("\n");
+    return line;
+  }).join("\n");
 }
 
 // ======================================================
@@ -361,20 +322,14 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (url.pathname === "/robots.txt") {
-      response.writeHead(200, {
-        ...corsHeaders(),
-        "Content-Type": "text/plain; charset=utf-8",
-      });
+      response.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
       response.end("User-agent: *\nDisallow: /");
       return;
     }
 
     if (url.pathname === "/" || url.pathname === "") {
-      response.writeHead(200, {
-        ...corsHeaders(),
-        "Content-Type": "text/plain; charset=utf-8",
-      });
-      response.end("All-in-One TV Proxy (Lime + Wink + Vitrina) is running.");
+      response.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
+      response.end("Dynamic Lime API + All-in-One TV Proxy is running.");
       return;
     }
 
@@ -499,111 +454,63 @@ const server = http.createServer(async (request, response) => {
     let processedM3u8 = "";
 
     try {
-      // 1. ДИНАМИЧЕСКИЙ ЗАПРОС ДЛЯ ЛИМЕ-КАНАЛОВ (С IP LAYERO)
-      if (LIME_CHANNELS[path]) {
-        const ch = LIME_CHANNELS[path];
-        const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
-        const apiRes = await fetchWithRetry(apiUrl, { headers: getHeaders(apiUrl) }, 3, 5000);
-        
-        if (!apiRes.ok) throw new Error(`Lime API status ${apiRes.status}`);
-        const apiData = await apiRes.json();
+      // 1. ИЩЕМ КАНАЛ В ДИНАМИЧЕСКОМ ПЛЕЙЛИСТЕ LIME API
+      const limeMap = await fetchLimeChannels();
+      let channelInfo = limeMap[path];
 
-        // Рекурсивный поиск master m3u8 ссылки
-        let masterUrl = null;
-        const findMaster = (obj) => {
-          if (masterUrl) return;
-          if (typeof obj === 'string' && obj.startsWith('http') && obj.includes('index.m3u8')) {
-            masterUrl = obj;
-            return;
-          }
-          if (typeof obj === 'object' && obj !== null) {
-            for (let val of Object.values(obj)) findMaster(val);
-          }
-        };
-        findMaster(apiData);
-
-        if (!masterUrl) throw new Error("Master URL not found in Lime API");
-
-        const masterRes = await fetchWithRetry(masterUrl, { headers: getHeaders(masterUrl) }, 3, 5000);
-        const masterText = await masterRes.text();
-
-        // Парсинг потоков (выбираем оптимальный битрейт, аналогично Python логике)
-        const lines = masterText.split(/\r?\n/);
-        let streams = [];
-        let currentInf = null;
-        for (let line of lines) {
-          line = line.trim();
-          if (line.startsWith("#EXT-X-STREAM-INF:")) {
-            currentInf = line;
-            continue;
-          }
-          if (currentInf && line && !line.startsWith("#")) {
-            const bwMatch = currentInf.match(/BANDWIDTH=(\d+)/);
-            const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
-            streams.push({ bandwidth: bw, url: new URL(line, masterUrl).toString() });
-            currentInf = null;
-          }
-        }
-
-        // Сортировка от большего к меньшему и выбор 3-го варианта (или минимального)
-        streams.sort((a, b) => b.bandwidth - a.bandwidth);
-        let selectedStreamUrl = masterUrl;
-        if (streams.length >= 3) {
-          selectedStreamUrl = streams[2].url;
-        } else if (streams.length > 0) {
-          selectedStreamUrl = streams[streams.length - 1].url;
-        }
-
-        const subRes = await fetchWithRetry(selectedStreamUrl, { headers: getHeaders(selectedStreamUrl) }, 3, 5000);
-        const rawM3u8 = await subRes.text();
-        processedM3u8 = resolveM3u8Urls(rawM3u8, selectedStreamUrl, devKey);
-
-      } else {
-        // 2. СТАНДАРТНЫЙ ЗАПРОС ИЗ КОНФИГОВ ДЛЯ ОСТАЛЬНЫХ КАНАЛОВ
-        const config = await fetchConfig();
-        const channelInfo = config[path];
-
-        if (!channelInfo || !channelInfo.url) {
-          if (cached && cached.content) {
-            response.writeHead(200, {
-              ...corsHeaders(),
-              "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
-            });
-            response.end(cached.content);
-            return;
-          }
-          response.writeHead(503, corsHeaders());
-          response.end();
-          return;
-        }
-
-        if (channelInfo.provider === "vitrina") {
-          const streamResponse = await fetchWithRetry(
-            channelInfo.url,
-            { headers: getVitrinaHeaders() },
-            3,
-            5000
-          );
-          if (!streamResponse.ok) throw new Error(`Vitrina status ${streamResponse.status}`);
-          const rawM3u8 = await streamResponse.text();
-          processedM3u8 = rewriteVitrinaPlaylist(rawM3u8, channelInfo.url);
-        } else {
-          const streamResponse = await fetchWithRetry(
-            channelInfo.url, 
-            { headers: getHeaders(channelInfo.url) },
-            3,
-            5000
-          );
-          if (!streamResponse.ok) throw new Error(`CDN status ${streamResponse.status}`);
-          const rawM3u8 = await streamResponse.text();
-          processedM3u8 = resolveM3u8Urls(rawM3u8, channelInfo.url, devKey);
-        }
+      // Если не нашли в Лайме, ищем во вторых источниках (Wink / Vitrina)
+      if (!channelInfo) {
+        const otherMap = await fetchOtherConfigs();
+        channelInfo = otherMap[path];
       }
 
-      // Кэшируем результат на 30 секунд для снижения нагрузки на API
+      if (!channelInfo || !channelInfo.url) {
+        // Если канал не найден, но есть старый кэш — отдаем его, чтобы избежать обрывов
+        if (cached && cached.content) {
+          response.writeHead(200, {
+            ...corsHeaders(),
+            "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+          });
+          response.end(cached.content);
+          return;
+        }
+        response.writeHead(404, corsHeaders());
+        response.end("Channel not found");
+        return;
+      }
+
+      // Запрос потока от источника
+      const provider = channelInfo.provider || "lime";
+      let streamResponse;
+
+      if (provider === "vitrina") {
+        streamResponse = await fetchWithRetry(channelInfo.url, { headers: getVitrinaHeaders() }, 3, 5000);
+        if (!streamResponse.ok) throw new Error(`Vitrina status ${streamResponse.status}`);
+        const rawM3u8 = await streamResponse.text();
+        processedM3u8 = rewriteVitrinaPlaylist(rawM3u8, channelInfo.url);
+      } else {
+        // Для Lime и прочих CDN запрашиваем с правильными заголовками
+        streamResponse = await fetchWithRetry(channelInfo.url, { headers: getHeaders(channelInfo.url) }, 3, 5000);
+        
+        // Если получили 503 или ошибку, сбрасываем кэш динамического плейлиста Lime и пробуем обновить один раз
+        if (!streamResponse.ok && provider === "lime") {
+          limeChannelsCache.fetchedAt = 0; // Сбрасываем таймер кэша
+          const freshMap = await fetchLimeChannels();
+          if (freshMap[path] && freshMap[path].url) {
+            channelInfo = freshMap[path];
+            streamResponse = await fetchWithRetry(channelInfo.url, { headers: getHeaders(channelInfo.url) }, 3, 5000);
+          }
+        }
+
+        if (!streamResponse.ok) throw new Error(`Upstream status ${streamResponse.status}`);
+        const rawM3u8 = await streamResponse.text();
+        processedM3u8 = resolveM3u8Urls(rawM3u8, channelInfo.url, devKey);
+      }
+
+      // Кэшируем готовый обработанный манифест на 20 секунд
       m3u8Cache.set(cachedKey, {
         content: processedM3u8,
-        expiresAt: now + 30000,
+        expiresAt: now + 20000,
       });
 
       response.writeHead(200, {
@@ -613,7 +520,7 @@ const server = http.createServer(async (request, response) => {
       response.end(processedM3u8);
 
     } catch (error) {
-      console.error(`Error fetching M3U8 for ${path}:`, error.message, error.cause ? `| Cause: ${error.cause.message || error.cause.code}` : '');
+      console.error(`Error fetching M3U8 for ${path}:`, error.message);
       
       if (cached && cached.content) {
         response.writeHead(200, {
@@ -635,7 +542,8 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`All-in-One Proxy listening on port ${PORT}`);
-  fetchConfig().catch(() => {});
+  console.log(`Dynamic Lime API Proxy listening on port ${PORT}`);
+  fetchLimeChannels().catch(() => {});
+  fetchOtherConfigs().catch(() => {});
   fetchAllowedDevices().catch(() => {});
 });
