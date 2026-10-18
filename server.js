@@ -1,7 +1,6 @@
 import http from "node:http";
 import https from "node:https";
 import { URL } from "node:url";
-import { Readable } from "node:stream";
 
 const PORT = process.env.PORT || 3000;
 const DEVICES_CONFIG_URL = process.env.DEVICES_CONFIG_URL;
@@ -16,7 +15,7 @@ const VITRINA_CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/config.json";
 
 // ======================================================
-// ДИНАМИЧЕСКИЕ КАНАЛЫ LIME (Android Profile)
+// КАНАЛЫ LIME (Android Profile)
 // ======================================================
 const LIME_CHANNELS = {
   "tvc_plus2": { id: 129, region: 66, tz: 5 },
@@ -24,7 +23,7 @@ const LIME_CHANNELS = {
   "tvc_plus6": { id: 129, region: 25, tz: 10 },
 };
 
-// Android App Agent для Лайма из вашего примера
+// Android App Agent для Лайма
 const LIME_ANDROID_AGENT = JSON.stringify({
   platform: "android",
   app: "limehd.ru.ctvshka",
@@ -67,7 +66,6 @@ function isWinkUrl(targetUrl) {
   );
 }
 
-// Заголовки под Android-приложение Лайма (никаких браузерных кук и капч)
 function getLimeHeaders(targetUrl = "") {
   if (targetUrl && isWinkUrl(targetUrl)) {
     return {
@@ -282,34 +280,13 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/" || url.pathname === "") {
       response.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Lime Android Proxy is running.");
+      response.end("Lime Android Full Proxy is running.");
       return;
     }
 
     if (url.pathname.includes("__layero_probe") || url.pathname === "/favicon.ico") {
       response.writeHead(404, corsHeaders());
       response.end();
-      return;
-    }
-
-    if (url.pathname.startsWith("/debug/")) {
-      const channelKey = url.pathname.replace("/debug/", "");
-      response.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json; charset=utf-8" });
-
-      if (!LIME_CHANNELS[channelKey]) {
-        response.end(JSON.stringify({ error: `Channel '${channelKey}' not found` }, null, 2));
-        return;
-      }
-
-      const ch = LIME_CHANNELS[channelKey];
-      const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
-
-      try {
-        const apiRes = await fetchTextWithRetry(apiUrl, getLimeHeaders(apiUrl), 2);
-        response.end(JSON.stringify({ channel: channelKey, apiUrl, status: apiRes.status, response: JSON.parse(apiRes.text) }, null, 2));
-      } catch (err) {
-        response.end(JSON.stringify({ channel: channelKey, error: err.message }, null, 2));
-      }
       return;
     }
 
@@ -322,6 +299,7 @@ const server = http.createServer(async (request, response) => {
       }
     }
 
+    // Проксирование внутренних m3u8 плейлистов
     if (url.pathname === "/proxy-m3u8") {
       const targetUrl = url.searchParams.get("url");
       if (!targetUrl) {
@@ -347,6 +325,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    // Проксирование видео-сегментов (.ts / .m4s) через сервер
     if (url.pathname === "/proxy-segment") {
       const targetUrl = url.searchParams.get("url");
       if (!targetUrl) {
@@ -371,7 +350,7 @@ const server = http.createServer(async (request, response) => {
         if (upstreamRes.headers["content-range"]) resHeaders["Content-Range"] = upstreamRes.headers["content-range"];
 
         response.writeHead(upstreamRes.statusCode || 200, resHeaders);
-        upstreamRes.pipe(response);
+        upstreamRes.pipe(upstreamRes, response); // исправлено на upstreamRes.pipe(response)
       } catch (e) {
         console.error("Error proxying segment:", e.message);
         response.writeHead(503, corsHeaders());
@@ -402,7 +381,6 @@ const server = http.createServer(async (request, response) => {
 
       if (LIME_CHANNELS[path]) {
         const ch = LIME_CHANNELS[path];
-        // Запрос к API с Android-заголовками
         const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
         const apiRes = await fetchTextWithRetry(apiUrl, getLimeHeaders(apiUrl), 3);
         const apiData = JSON.parse(apiRes.text);
@@ -424,7 +402,7 @@ const server = http.createServer(async (request, response) => {
         }
 
         if (!masterUrl) throw new Error("Master URL not found in Lime API response");
-        console.log(`[Lime Android] Мастер-ссылка для ${path}: ${masterUrl}`);
+        console.log(`[Lime Android Proxy] Мастер-ссылка для ${path}: ${masterUrl}`);
 
       } else {
         const otherMap = await fetchOtherConfigs();
@@ -490,7 +468,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Lime Android Proxy listening on port ${PORT}`);
+  console.log(`Lime Android Full Proxy listening on port ${PORT}`);
   fetchOtherConfigs().catch(() => {});
   fetchAllowedDevices().catch(() => {});
 });
