@@ -61,7 +61,6 @@ function isWinkUrl(targetUrl) {
   );
 }
 
-// Полная эмуляция веб-браузера на сайте limehd.tv
 function getWebHeaders(targetUrl = "") {
   const baseHeaders = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -104,7 +103,7 @@ function getVitrinaHeaders() {
 }
 
 // ======================================================
-// FETCH WITH RETRY & BROWSER EMULATION
+// FETCH WITH RETRY
 // ======================================================
 async function fetchWithRetry(url, options = {}, retries = 3, timeoutMs = 6000) {
   let lastError;
@@ -195,7 +194,7 @@ function isM3u8Url(urlStr) {
 }
 
 // ======================================================
-// REWRITERS (Все ссылки подменяются на наш прокси)
+// REWRITERS
 // ======================================================
 function resolveM3u8Urls(m3u8Text, baseUrlStr, devKey = "") {
   const baseUrl = new URL(baseUrlStr);
@@ -276,7 +275,7 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/" || url.pathname === "") {
       response.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Lime Web-Emulated Proxy is running.");
+      response.end("Lime Fixed Proxy is running.");
       return;
     }
 
@@ -286,7 +285,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    // Диагностика
+    // Диагностический эндпоинт
     if (url.pathname.startsWith("/debug/")) {
       const channelKey = url.pathname.replace("/debug/", "");
       response.writeHead(200, { ...corsHeaders(), "Content-Type": "application/json; charset=utf-8" });
@@ -318,7 +317,6 @@ const server = http.createServer(async (request, response) => {
       }
     }
 
-    // Проксирование дочерних .m3u8 плейлистов
     if (url.pathname === "/proxy-m3u8") {
       const targetUrl = url.searchParams.get("url");
       if (!targetUrl) {
@@ -351,7 +349,6 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    // Проксирование видео-сегментов (.ts)
     if (url.pathname === "/proxy-segment") {
       const targetUrl = url.searchParams.get("url");
       if (!targetUrl) {
@@ -429,7 +426,7 @@ const server = http.createServer(async (request, response) => {
       let masterUrl = null;
       let provider = "lime";
 
-      // 1. ДИНАМИЧЕСКИЙ ЗАПРОС К API LIME
+      // 1. ДИНАМИЧЕСКИЙ ЗАПРОС К API LIME С ИЗВЛЕЧЕНИЕМ ССЫЛКИ ИЗ stream.common или url
       if (LIME_CHANNELS[path]) {
         const ch = LIME_CHANNELS[path];
         const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
@@ -438,20 +435,26 @@ const server = http.createServer(async (request, response) => {
         if (!apiRes.ok) throw new Error(`Lime API status ${apiRes.status}`);
         const apiData = await apiRes.json();
 
-        // Поиск master.m3u8 ссылки в ответе
-        const findMaster = (obj) => {
-          if (masterUrl) return;
-          if (typeof obj === 'string' && obj.startsWith('http') && obj.includes('index.m3u8')) {
-            masterUrl = obj;
-            return;
-          }
-          if (typeof obj === 'object' && obj !== null) {
-            for (let val of Object.values(obj)) findMaster(val);
-          }
-        };
-        findMaster(apiData);
+        // Точное извлечение ссылки из структуры ответа Лайма
+        masterUrl = apiData.url || (apiData.stream && apiData.stream.common) || null;
 
-        if (!masterUrl) throw new Error("Master URL not found in Lime API");
+        if (!masterUrl) {
+          // Запасной глубокий поиск, если структура вдруг изменится
+          const findMaster = (obj) => {
+            if (masterUrl) return;
+            if (typeof obj === 'string' && obj.startsWith('http') && obj.includes('index.m3u8')) {
+              masterUrl = obj;
+              return;
+            }
+            if (typeof obj === 'object' && obj !== null) {
+              for (let val of Object.values(obj)) findMaster(val);
+            }
+          };
+          findMaster(apiData);
+        }
+
+        if (!masterUrl) throw new Error("Master URL not found in Lime API response");
+        console.log(`[Lime] Получена мастер-ссылка для ${path}: ${masterUrl}`);
 
       } else {
         // 2. ДЛЯ ОСТАЛЬНЫХ КАНАЛОВ (Wink / Vitrina)
@@ -476,7 +479,7 @@ const server = http.createServer(async (request, response) => {
         provider = channelInfo.provider || "wink";
       }
 
-      // Скачиваем плейлист от CDN и переписываем все ссылки на свой прокси
+      // Скачиваем мастер-плейлист и переписываем все дочерние пути на наш прокси
       let streamResponse;
       if (provider === "vitrina") {
         streamResponse = await fetchWithRetry(masterUrl, { headers: getVitrinaHeaders() }, 3, 5000);
@@ -524,7 +527,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Web-Emulated Proxy listening on port ${PORT}`);
+  console.log(`Lime Fixed Proxy listening on port ${PORT}`);
   fetchOtherConfigs().catch(() => {});
   fetchAllowedDevices().catch(() => {});
 });
