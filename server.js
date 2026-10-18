@@ -6,7 +6,7 @@ const PORT = process.env.PORT || 3000;
 const DEVICES_CONFIG_URL = process.env.DEVICES_CONFIG_URL;
 
 // ======================================================
-// CONFIG URLS (Для других провайдеров, если нужны)
+// CONFIG URLS (Для других провайдеров, например Wink)
 // ======================================================
 const WINK_CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/wink.json";
@@ -15,10 +15,17 @@ const VITRINA_CONFIG_URL =
   "https://gitverse.ru/api/repos/Timofey91/mediavitrina-proxy/raw/branch/master/config.json";
 
 // ======================================================
-// LIME API SETTINGS (Из Lua-скрипта Nexterr/NEKTO666)
+// ДИНАМИЧЕСКИЕ КАНАЛЫ LIME (Через v4/channel с IP Layero)
 // ======================================================
-const LIME_PLAYLIST_API = "https://pl.iptv2021.com/api/v1/playlist";
+const LIME_CHANNELS = {
+  "tvc_plus2": { id: 129, region: 66, tz: 5 },
+  "tvc_plus4": { id: 129, region: 54, tz: 7 },
+  "tvc_plus6": { id: 129, region: 25, tz: 10 },
+};
 
+// ======================================================
+// HEADERS & AGENTS (Из Lua-скрипта Nexterr/NEKTO666)
+// ======================================================
 const LIME_WEB_AGENT = JSON.stringify({
   platform: "web",
   app: "limehd.tv",
@@ -29,7 +36,6 @@ const VITRINA_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 8.0.1;)";
 const VITRINA_REFERER = "https://player.mediavitrina.ru/";
 
 let ALLOWED_DEVICES = new Set();
-let limeChannelsCache = { map: {}, fetchedAt: 0 };
 let otherConfigCache = { data: null, fetchedAt: 0 };
 const m3u8Cache = new Map();
 
@@ -139,70 +145,11 @@ async function fetchAllowedDevices() {
       const devicesArray = await res.json();
       if (Array.isArray(devicesArray)) {
         ALLOWED_DEVICES = new Set(devicesArray.map((d) => String(d).trim()));
-        console.log(`[Devices] Загружено разрешенных ключей: ${ALLOWED_DEVICES.size}`);
       }
     }
   } catch (e) {
     console.error("[Devices] Ошибка загрузки ключей:", e.message);
   }
-}
-
-// ======================================================
-// DINAMIC LIME CHANNELS LOADER (Прямо с плейлиста API)
-// ======================================================
-async function fetchLimeChannels() {
-  const now = Date.now();
-  // Кэшируем список каналов Lime на 5 минут, чтобы не бомбить API при переключении каналов
-  if (limeChannelsCache.map && Object.keys(limeChannelsCache.map).length > 0 && (now - limeChannelsCache.fetchedAt < 5 * 60 * 1000)) {
-    return limeChannelsCache.map;
-  }
-
-  try {
-    const res = await fetchWithRetry(
-      LIME_PLAYLIST_API,
-      { headers: getHeaders(LIME_PLAYLIST_API) },
-      3,
-      6000
-    );
-
-    if (!res.ok) throw new Error(`Lime playlist HTTP status ${res.status}`);
-    
-    const data = await res.json();
-    const channelsMap = {};
-
-    if (data && Array.isArray(data.channels)) {
-      for (const ch of data.channels) {
-        // Используем id канала (например, 129 или строковый адрес) как ключ поиска
-        if (ch.address && ch.url) {
-          channelsMap[ch.address] = {
-            url: ch.url,
-            name: ch.name_ru,
-            provider: "lime",
-          };
-        }
-        // Дополнительно дублируем по числовому ID на случай запросов вида /129
-        if (ch.id && ch.url) {
-          channelsMap[String(ch.id)] = {
-            url: ch.url,
-            name: ch.name_ru,
-            provider: "lime",
-          };
-        }
-      }
-    }
-
-    if (Object.keys(channelsMap).length > 0) {
-      limeChannelsCache = {
-        map: channelsMap,
-        fetchedAt: now,
-      };
-      console.log(`[LimeAPI] Успешно загружено каналов: ${Object.keys(channelsMap).length}`);
-    }
-  } catch (e) {
-    console.error("[LimeAPI] Ошибка получения динамического плейлиста:", e.message);
-  }
-
-  return limeChannelsCache.map;
 }
 
 // Загрузчик прочих конфигов (Wink / Vitrina)
@@ -329,7 +276,7 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/" || url.pathname === "") {
       response.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Dynamic Lime API + All-in-One TV Proxy is running.");
+      response.end("Lime API v4 + All-in-One TV Proxy is running.");
       return;
     }
 
@@ -454,60 +401,101 @@ const server = http.createServer(async (request, response) => {
     let processedM3u8 = "";
 
     try {
-      // 1. ИЩЕМ КАНАЛ В ДИНАМИЧЕСКОМ ПЛЕЙЛИСТЕ LIME API
-      const limeMap = await fetchLimeChannels();
-      let channelInfo = limeMap[path];
+      let streamUrl = null;
+      let provider = "lime";
 
-      // Если не нашли в Лайме, ищем во вторых источниках (Wink / Vitrina)
-      if (!channelInfo) {
-        const otherMap = await fetchOtherConfigs();
-        channelInfo = otherMap[path];
-      }
-
-      if (!channelInfo || !channelInfo.url) {
-        // Если канал не найден, но есть старый кэш — отдаем его, чтобы избежать обрывов
-        if (cached && cached.content) {
-          response.writeHead(200, {
-            ...corsHeaders(),
-            "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
-          });
-          response.end(cached.content);
-          return;
-        }
-        response.writeHead(404, corsHeaders());
-        response.end("Channel not found");
-        return;
-      }
-
-      // Запрос потока от источника
-      const provider = channelInfo.provider || "lime";
-      let streamResponse;
-
-      if (provider === "vitrina") {
-        streamResponse = await fetchWithRetry(channelInfo.url, { headers: getVitrinaHeaders() }, 3, 5000);
-        if (!streamResponse.ok) throw new Error(`Vitrina status ${streamResponse.status}`);
-        const rawM3u8 = await streamResponse.text();
-        processedM3u8 = rewriteVitrinaPlaylist(rawM3u8, channelInfo.url);
-      } else {
-        // Для Lime и прочих CDN запрашиваем с правильными заголовками
-        streamResponse = await fetchWithRetry(channelInfo.url, { headers: getHeaders(channelInfo.url) }, 3, 5000);
+      // 1. ДИНАМИЧЕСКИЙ ЗАПРОС ЧЕРЕЗ API v4 ДЛЯ ТАЙМШИФТ КАНАЛОВ (tvc_plus2 и т.д.)
+      if (LIME_CHANNELS[path]) {
+        const ch = LIME_CHANNELS[path];
+        const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
+        const apiRes = await fetchWithRetry(apiUrl, { headers: getHeaders(apiUrl) }, 3, 5000);
         
-        // Если получили 503 или ошибку, сбрасываем кэш динамического плейлиста Lime и пробуем обновить один раз
-        if (!streamResponse.ok && provider === "lime") {
-          limeChannelsCache.fetchedAt = 0; // Сбрасываем таймер кэша
-          const freshMap = await fetchLimeChannels();
-          if (freshMap[path] && freshMap[path].url) {
-            channelInfo = freshMap[path];
-            streamResponse = await fetchWithRetry(channelInfo.url, { headers: getHeaders(channelInfo.url) }, 3, 5000);
+        if (!apiRes.ok) throw new Error(`Lime API status ${apiRes.status}`);
+        const apiData = await apiRes.json();
+
+        // Рекурсивный поиск master.m3u8 в ответе API
+        let masterUrl = null;
+        const findMaster = (obj) => {
+          if (masterUrl) return;
+          if (typeof obj === 'string' && obj.startsWith('http') && obj.includes('index.m3u8')) {
+            masterUrl = obj;
+            return;
+          }
+          if (typeof obj === 'object' && obj !== null) {
+            for (let val of Object.values(obj)) findMaster(val);
+          }
+        };
+        findMaster(apiData);
+
+        if (!masterUrl) throw new Error("Master URL not found in Lime API");
+
+        const masterRes = await fetchWithRetry(masterUrl, { headers: getHeaders(masterUrl) }, 3, 5000);
+        const masterText = await masterRes.text();
+
+        // Парсинг потоков и выбор стабильного битрейта (480p / 3-й вариант, как в Python)
+        const lines = masterText.split(/\r?\n/);
+        let streams = [];
+        let currentInf = null;
+        for (let line of lines) {
+          line = line.trim();
+          if (line.startsWith("#EXT-X-STREAM-INF:")) {
+            currentInf = line;
+            continue;
+          }
+          if (currentInf && line && !line.startsWith("#")) {
+            const bwMatch = currentInf.match(/BANDWIDTH=(\d+)/);
+            const bw = bwMatch ? parseInt(bwMatch[1], 10) : 0;
+            streams.push({ bandwidth: bw, url: new URL(line, masterUrl).toString() });
+            currentInf = null;
           }
         }
 
-        if (!streamResponse.ok) throw new Error(`Upstream status ${streamResponse.status}`);
-        const rawM3u8 = await streamResponse.text();
-        processedM3u8 = resolveM3u8Urls(rawM3u8, channelInfo.url, devKey);
+        streams.sort((a, b) => b.bandwidth - a.bandwidth);
+        if (streams.length >= 3) {
+          streamUrl = streams[2].url;
+        } else if (streams.length > 0) {
+          streamUrl = streams[streams.length - 1].url;
+        } else {
+          streamUrl = masterUrl;
+        }
+
+      } else {
+        // 2. ДЛЯ ОСТАЛЬНЫХ КАНАЛОВ ИЩЕМ ВО ВНЕШНИХ КОНФИГАХ (Wink / Vitrina)
+        const otherMap = await fetchOtherConfigs();
+        const channelInfo = otherMap[path];
+
+        if (!channelInfo || !channelInfo.url) {
+          if (cached && cached.content) {
+            response.writeHead(200, {
+              ...corsHeaders(),
+              "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+            });
+            response.end(cached.content);
+            return;
+          }
+          response.writeHead(404, corsHeaders());
+          response.end("Channel not found");
+          return;
+        }
+
+        streamUrl = channelInfo.url;
+        provider = channelInfo.provider || "wink";
       }
 
-      // Кэшируем готовый обработанный манифест на 20 секунд
+      // Запрос потока и обработка плейлиста
+      let streamResponse;
+      if (provider === "vitrina") {
+        streamResponse = await fetchWithRetry(streamUrl, { headers: getVitrinaHeaders() }, 3, 5000);
+        if (!streamResponse.ok) throw new Error(`Vitrina status ${streamResponse.status}`);
+        const rawM3u8 = await streamResponse.text();
+        processedM3u8 = rewriteVitrinaPlaylist(rawM3u8, streamUrl);
+      } else {
+        streamResponse = await fetchWithRetry(streamUrl, { headers: getHeaders(streamUrl) }, 3, 5000);
+        if (!streamResponse.ok) throw new Error(`Upstream status ${streamResponse.status}`);
+        const rawM3u8 = await streamResponse.text();
+        processedM3u8 = resolveM3u8Urls(rawM3u8, streamUrl, devKey);
+      }
+
       m3u8Cache.set(cachedKey, {
         content: processedM3u8,
         expiresAt: now + 20000,
@@ -542,8 +530,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Dynamic Lime API Proxy listening on port ${PORT}`);
-  fetchLimeChannels().catch(() => {});
+  console.log(`Proxy listening on port ${PORT}`);
   fetchOtherConfigs().catch(() => {});
   fetchAllowedDevices().catch(() => {});
 });
