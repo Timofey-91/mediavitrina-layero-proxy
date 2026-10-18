@@ -24,7 +24,7 @@ const LIME_CHANNELS = {
 };
 
 // ======================================================
-// HEADERS & AGENTS (Веб-заголовки из Lua-скрипта)
+// HEADERS & AGENTS (Имитация браузера на limehd.tv)
 // ======================================================
 const LIME_WEB_AGENT = JSON.stringify({
   platform: "web",
@@ -61,6 +61,7 @@ function isWinkUrl(targetUrl) {
   );
 }
 
+// Полная эмуляция веб-браузера на сайте limehd.tv
 function getWebHeaders(targetUrl = "") {
   const baseHeaders = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -71,7 +72,7 @@ function getWebHeaders(targetUrl = "") {
   if (targetUrl && isWinkUrl(targetUrl)) {
     return {
       ...baseHeaders,
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
       "Referer": "https://wink.ru/",
       "Origin": "https://wink.ru",
       "Accept": "*/*",
@@ -81,11 +82,15 @@ function getWebHeaders(targetUrl = "") {
 
   return {
     ...baseHeaders,
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "x-lhd-agent": LIME_WEB_AGENT,
     "Referer": "https://limehd.tv/",
     "Origin": "https://limehd.tv",
     "Accept": "*/*",
+    "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "cross-site",
     "Connection": "keep-alive",
   };
 }
@@ -99,9 +104,9 @@ function getVitrinaHeaders() {
 }
 
 // ======================================================
-// FETCH WITH RETRY
+// FETCH WITH RETRY & BROWSER EMULATION
 // ======================================================
-async function fetchWithRetry(url, options = {}, retries = 3, timeoutMs = 5000) {
+async function fetchWithRetry(url, options = {}, retries = 3, timeoutMs = 6000) {
   let lastError;
   for (let i = 0; i < retries; i++) {
     try {
@@ -120,7 +125,7 @@ async function fetchWithRetry(url, options = {}, retries = 3, timeoutMs = 5000) 
       lastError = e;
     }
     if (i < retries - 1) {
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 800));
     }
   }
   throw lastError || new Error(`Failed to fetch ${url}`);
@@ -190,7 +195,7 @@ function isM3u8Url(urlStr) {
 }
 
 // ======================================================
-// REWRITERS
+// REWRITERS (Все ссылки подменяются на наш прокси)
 // ======================================================
 function resolveM3u8Urls(m3u8Text, baseUrlStr, devKey = "") {
   const baseUrl = new URL(baseUrlStr);
@@ -271,7 +276,7 @@ const server = http.createServer(async (request, response) => {
 
     if (url.pathname === "/" || url.pathname === "") {
       response.writeHead(200, { ...corsHeaders(), "Content-Type": "text/plain; charset=utf-8" });
-      response.end("Lime Master M3U8 Proxy is running.");
+      response.end("Lime Web-Emulated Proxy is running.");
       return;
     }
 
@@ -313,6 +318,7 @@ const server = http.createServer(async (request, response) => {
       }
     }
 
+    // Проксирование дочерних .m3u8 плейлистов
     if (url.pathname === "/proxy-m3u8") {
       const targetUrl = url.searchParams.get("url");
       if (!targetUrl) {
@@ -345,6 +351,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    // Проксирование видео-сегментов (.ts)
     if (url.pathname === "/proxy-segment") {
       const targetUrl = url.searchParams.get("url");
       if (!targetUrl) {
@@ -422,7 +429,7 @@ const server = http.createServer(async (request, response) => {
       let masterUrl = null;
       let provider = "lime";
 
-      // 1. ДИНАМИЧЕСКИЙ ЗАПРОС К MASTER M3U8 ДЛЯ LIME
+      // 1. ДИНАМИЧЕСКИЙ ЗАПРОС К API LIME
       if (LIME_CHANNELS[path]) {
         const ch = LIME_CHANNELS[path];
         const apiUrl = `https://pl.iptv2021.com/api/v4/channel?id=${ch.id}&tz=${ch.tz}&region=${ch.region}`;
@@ -431,7 +438,7 @@ const server = http.createServer(async (request, response) => {
         if (!apiRes.ok) throw new Error(`Lime API status ${apiRes.status}`);
         const apiData = await apiRes.json();
 
-        // Достаем прямую master-ссылку (index.m3u8) из JSON
+        // Поиск master.m3u8 ссылки в ответе
         const findMaster = (obj) => {
           if (masterUrl) return;
           if (typeof obj === 'string' && obj.startsWith('http') && obj.includes('index.m3u8')) {
@@ -469,7 +476,7 @@ const server = http.createServer(async (request, response) => {
         provider = channelInfo.provider || "wink";
       }
 
-      // Отдаем исходный Master M3U8 с переписанными ссылками на под-плейлисты
+      // Скачиваем плейлист от CDN и переписываем все ссылки на свой прокси
       let streamResponse;
       if (provider === "vitrina") {
         streamResponse = await fetchWithRetry(masterUrl, { headers: getVitrinaHeaders() }, 3, 5000);
@@ -517,7 +524,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Master M3U8 Proxy listening on port ${PORT}`);
+  console.log(`Web-Emulated Proxy listening on port ${PORT}`);
   fetchOtherConfigs().catch(() => {});
   fetchAllowedDevices().catch(() => {});
 });
