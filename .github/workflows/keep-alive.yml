@@ -2,7 +2,7 @@ name: Keep GitVerse Alive (Both Repos)
 
 on:
   schedule:
-    - cron: "0 0 */3 * *" # Запуск каждые 3 дня
+    - cron: "0 0 */1 * *" # Запуск каждые 3 дня
   workflow_dispatch: # Кнопка для ручного запуска на GitHub
 
 jobs:
