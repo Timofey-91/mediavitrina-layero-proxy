@@ -1,4 +1,4 @@
-name: Update IPTV Config
+name: Update IPTV link
 
 on:
   schedule:
@@ -6,8 +6,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  update-config:
+  update:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -17,7 +18,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run Mediavitrina parser
-        run: |
-          echo "Starting Mediavitrina parser..."
-          python3 update_config.py
+      - name: Update config.json
+        run: python update_config.py
+
+      - name: Show updated config
+        run: cat config.json
