@@ -1,0 +1,23 @@
+name: Update IPTV Config
+
+on:
+  schedule:
+    - cron: "37 8 */5 * *"
+  workflow_dispatch:
+
+jobs:
+  update-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Mediavitrina parser
+        run: |
+          echo "Starting Mediavitrina parser..."
+          python3 update_config.py
